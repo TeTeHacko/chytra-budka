@@ -1,0 +1,48 @@
+# Chytrá Budka MQTT → Prometheus bridge — systemd unit
+# Managed by Ansible — do not edit manually.
+
+[Unit]
+Description=Chytrá Budka MQTT → Prometheus bridge
+After=network-online.target
+Wants=network-online.target
+# Bound restart loops: if it dies 5× in 5 min (e.g. a persistent config
+# error), stop trying and surface a failed unit instead of hammering.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=cbprom
+Group=cbprom
+ExecStart=__VENV__/bin/python __VENV__/bin/cbprom.py --config /etc/cb-prom/config.toml
+# Restart=always (not on-failure): an always-on daemon should also come back
+# after a stray clean exit(0) from an unexpected path. systemctl stop still
+# stops it cleanly (SIGTERM → graceful disconnect → exit 0, not restarted).
+Restart=always
+RestartSec=5
+
+# Hardening — the daemon needs network + read access to /etc/cb-prom/
+# and nothing else. The listen port is bound by Python, no privileged
+# port required.
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/etc/cb-prom
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+
+# StandardOutput=journal already by default; keep ERR there too so
+# crashes are visible in `journalctl -u cbprom-exporter`.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,20 @@
+---
+# clang-format config for chytra-budka firmware.
+# NOTE: Existing FW source has not been formatted yet; this config is
+# applied via the manual pre-commit stage only. Run on demand with:
+#   pre-commit run --hook-stage manual clang-format --all-files
+BasedOnStyle: Google
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 100
+DerivePointerAlignment: false
+PointerAlignment: Right
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+SortIncludes: false
+IncludeBlocks: Preserve
+SpaceBeforeParens: ControlStatements
+BreakBeforeBraces: Attach
+AlignConsecutiveMacros: AcrossEmptyLinesAndComments

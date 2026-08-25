@@ -1,0 +1,67 @@
+// Chytrá Budka rev3.2 — block wiring (TB layout, ranked)
+// Render: dot -Tsvg wiring.dot -o wiring.svg
+
+digraph wiring {
+  rankdir=TB;
+  graph [splines=true, nodesep=0.8, ranksep=1.4, fontname="Inter, sans-serif", bgcolor="white"];
+  node  [shape=record, fontname="JetBrains Mono, monospace", fontsize=10, color="#444"];
+  edge  [fontname="Inter, sans-serif", fontsize=9, arrowhead=none, penwidth=2];
+
+  // ─── Components ───────────────────────────────────────────────────────
+  SOLAR [label="{ Solar 6V/2W | { <pP> + | <pN> - } }"];
+  BATT  [label="{ 18650 Li-Ion | { <pP> + | <pN> - } }"];
+
+  TP4056 [label="{ TP4056 charger + protection | { \
+      <pINP> IN+ | <pINN> IN- | <pBATP> BAT+ | <pBATN> BAT- | <pOUTP> OUT+ | <pOUTN> OUT- } }"];
+
+  XIAO [label="{ XIAO ESP32-S3 Sense | { \
+      <p5V> 5V | <pGND> GND | <p3V3> 3V3 | \
+      <pD2> D2/GPIO3 | <pD3> D3/GPIO4 | <pD4> D4/GPIO5 (SDA) | <pD5> D5/GPIO6 (SCL) } }"];
+
+  MAX17048 [label="{ MAX17048 fuel gauge (I²C 0x36) | { \
+      <pVDD> VDD | <pGND> GND | <pSDA> SDA | <pSCL> SCL | <pSNS> VBAT_SENSE } }"];
+
+  SHT41 [label="{ SHT41 T+RH (I²C 0x44) | { \
+      <pVDD> VDD | <pGND> GND | <pSDA> SDA | <pSCL> SCL } }"];
+
+  PIR   [label="{ AM312 PIR | { <pVCC> VCC | <pOUT> OUT | <pGND> GND } }"];
+  IRDRV [label="{ IR LED 940nm + AO3400 + 220Ω | { <pVIN> VIN | <pGATE> GATE | <pGND> GND } }"];
+
+  // ─── Layout: 4 ranks (power-source / charger / MCU / sensors) ─────────
+  { rank=same; SOLAR; BATT }
+  { rank=same; TP4056 }
+  { rank=same; XIAO }
+  { rank=same; MAX17048; SHT41; PIR; IRDRV }
+
+  // ─── Power chain ──────────────────────────────────────────────────────
+  SOLAR:pP    -> TP4056:pINP   [label="solar +", color="red"];
+  SOLAR:pN    -> TP4056:pINN   [label="solar -", color="black"];
+  BATT:pP     -> TP4056:pBATP  [label="VBAT +",  color="red"];
+  BATT:pN     -> TP4056:pBATN  [label="VBAT -",  color="black"];
+  TP4056:pOUTP-> XIAO:p5V      [label="5V",      color="red"];
+  TP4056:pOUTN-> XIAO:pGND     [label="GND",     color="black"];
+
+  // ─── Sense tap ────────────────────────────────────────────────────────
+  TP4056:pBATP-> MAX17048:pSNS [label="V_cell sense", color="goldenrod"];
+
+  // ─── I²C bus ──────────────────────────────────────────────────────────
+  XIAO:p3V3   -> MAX17048:pVDD [label="3V3", color="orange"];
+  XIAO:pGND   -> MAX17048:pGND [label="GND", color="black"];
+  XIAO:pD4    -> MAX17048:pSDA [label="SDA", color="blue"];
+  XIAO:pD5    -> MAX17048:pSCL [label="SCL", color="green"];
+
+  XIAO:p3V3   -> SHT41:pVDD    [label="3V3", color="orange"];
+  XIAO:pGND   -> SHT41:pGND    [label="GND", color="black"];
+  XIAO:pD4    -> SHT41:pSDA    [label="SDA", color="blue"];
+  XIAO:pD5    -> SHT41:pSCL    [label="SCL", color="green"];
+
+  // ─── PIR ──────────────────────────────────────────────────────────────
+  XIAO:p5V    -> PIR:pVCC      [label="5V",     color="red"];
+  PIR:pOUT    -> XIAO:pD2      [label="motion", color="purple"];
+  XIAO:pGND   -> PIR:pGND      [label="GND",    color="black"];
+
+  // ─── IR LED ───────────────────────────────────────────────────────────
+  XIAO:p5V    -> IRDRV:pVIN    [label="5V",     color="red"];
+  XIAO:pD3    -> IRDRV:pGATE   [label="PWM",    color="goldenrod"];
+  XIAO:pGND   -> IRDRV:pGND    [label="GND",    color="black"];
+}

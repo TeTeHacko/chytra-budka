@@ -1,0 +1,260 @@
+---
+# Deploy the MQTT → Prometheus bridge.
+#
+# Usage:
+#   ansible-playbook -i metrics-bridge/inventory.yml metrics-bridge/deploy.yml
+#   ansible-playbook -i metrics-bridge/inventory.yml metrics-bridge/deploy.yml --tags config
+#
+# Mirrors the power-meter/deploy.yml structure (system user → venv →
+# config → systemd → Alloy file_sd) so an operator familiar with one
+# can read the other.
+
+- name: Deploy Chytrá Budka MQTT → Prometheus bridge
+  hosts: cbprom_exporters
+  become: true
+  gather_facts: true
+
+  tasks:
+    # ─── System user ──────────────────────────────────────────────────────
+    # ansible.builtin.user does NOT auto-create the primary group when
+    # `group: <name>` references a non-existent group — it errors with
+    # "Group X does not exist". Declare the group explicitly first.
+    - name: Create cbprom system group
+      ansible.builtin.group:
+        name: "{{ cbprom_group }}"
+        system: true
+      tags: [install]
+
+    - name: Create cbprom system user
+      ansible.builtin.user:
+        name: "{{ cbprom_user }}"
+        group: "{{ cbprom_group }}"
+        # `ssl-cert` granted as supplementary so the cbd-enroll daemon
+        # can read /etc/ansible-ca/sub_ca_budka.key (deployed mode 0640
+        # root:ssl-cert by roles/ansible_ca/tasks/sub_ca_budka.yml).
+        # The group exists on hosts where the ansible_ca role has run
+        # at least once; deploy.yml asserts that with the next task.
+        groups: ssl-cert
+        append: true
+        system: true
+        create_home: false
+        shell: /sbin/nologin
+        comment: "Chytrá Budka MQTT→Prom bridge + enrollment signer"
+      tags: [install]
+
+    - name: Verify ssl-cert group exists (ansible_ca role must run first)
+      ansible.builtin.getent:
+        database: group
+        key: ssl-cert
+        fail_key: true
+      tags: [install]
+
+    # ─── Python venv ──────────────────────────────────────────────────────
+    - name: Create venv directory
+      ansible.builtin.file:
+        path: "{{ cbprom_venv_dir }}"
+        state: directory
+        owner: "{{ cbprom_user }}"
+        group: "{{ cbprom_group }}"
+        mode: "0755"
+      tags: [install]
+
+    - name: Create Python venv
+      ansible.builtin.command:
+        cmd: "python3 -m venv {{ cbprom_venv_dir }}"
+        creates: "{{ cbprom_venv_dir }}/bin/python"
+      tags: [install]
+
+    # Use the venv's own pip directly instead of ansible.builtin.pip —
+    # the latter requires the `packaging` Python module to be available
+    # in the Ansible controller's interpreter (systemwide python3 on a
+    # `local` connection), which on a fresh Arch box isn't installed by
+    # default. The venv has its own pip with all the deps it needs;
+    # invoking it via command keeps the playbook self-contained.
+    - name: Install Python dependencies into venv
+      ansible.builtin.command:
+        cmd: "{{ cbprom_venv_dir }}/bin/pip install --quiet -r {{ playbook_dir }}/requirements.txt"
+      register: pip_install
+      changed_when: "'Successfully installed' in pip_install.stdout
+                      or 'Successfully installed' in pip_install.stderr"
+      tags: [install]
+
+    - name: Install cbprom.py into venv bin
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/cbprom.py"
+        dest: "{{ cbprom_venv_dir }}/bin/cbprom.py"
+        owner: root
+        group: root
+        mode: "0755"
+      notify: restart cbprom
+      tags: [install, code]
+
+    - name: Install enroll.py into venv bin
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/enroll.py"
+        dest: "{{ cbprom_venv_dir }}/bin/enroll.py"
+        owner: root
+        group: root
+        mode: "0755"
+      notify: restart cbd-enroll
+      tags: [install, code]
+
+    # ─── Config dir + secrets ─────────────────────────────────────────────
+    - name: Create config dir
+      ansible.builtin.file:
+        path: "{{ cbprom_config_dir }}"
+        state: directory
+        owner: root
+        group: "{{ cbprom_group }}"
+        mode: "0750"
+      tags: [config]
+
+    - name: Render config.toml
+      ansible.builtin.template:
+        src: templates/config.toml.j2
+        dest: "{{ cbprom_config_dir }}/config.toml"
+        owner: root
+        group: "{{ cbprom_group }}"
+        mode: "0640"
+      notify: restart cbprom
+      tags: [config]
+
+    # MQTT creds live in 0640 files owned by cbprom group. Operator
+    # populates them out-of-band (or hands them via --extra-vars
+    # mqtt_user=...; we don't store them in the play itself so the
+    # repo stays secret-free).
+    - name: Ensure MQTT user file exists
+      ansible.builtin.copy:
+        dest: "{{ cbprom_config_dir }}/mqtt_user"
+        content: "{{ cbprom_mqtt_user | default(lookup('env', 'CB_MQTT_USER') or 'CHANGE_ME', true) }}\n"
+        owner: root
+        group: "{{ cbprom_group }}"
+        mode: "0640"
+        force: false  # don't clobber an already-deployed secret on rerun
+      notify: restart cbprom
+      tags: [secrets]
+
+    - name: Ensure MQTT password file exists
+      ansible.builtin.copy:
+        dest: "{{ cbprom_config_dir }}/mqtt_pass"
+        content: "{{ cbprom_mqtt_pass | default(lookup('env', 'CB_MQTT_PASS') or 'CHANGE_ME', true) }}\n"
+        owner: root
+        group: "{{ cbprom_group }}"
+        mode: "0640"
+        force: false
+      no_log: true
+      notify: restart cbprom
+      tags: [secrets]
+
+    # ─── systemd unit ─────────────────────────────────────────────────────
+    - name: Install systemd unit
+      ansible.builtin.copy:
+        src: cbprom-exporter.service
+        dest: /etc/systemd/system/cbprom-exporter.service
+        owner: root
+        group: root
+        mode: "0644"
+      notify:
+        - reload systemd
+        - restart cbprom
+      tags: [install]
+
+    - name: Patch __VENV__ placeholder in unit
+      # ExecStart uses __VENV__ as a literal so the same file works
+      # across hosts that might choose different venv paths. Replace
+      # post-copy rather than templating the whole unit through Jinja —
+      # keeps the .service file editable + lint-friendly outside Ansible.
+      ansible.builtin.replace:
+        path: /etc/systemd/system/cbprom-exporter.service
+        regexp: __VENV__
+        replace: "{{ cbprom_venv_dir }}"
+      notify:
+        - reload systemd
+        - restart cbprom
+      tags: [install]
+
+    - name: Enable + start cbprom-exporter
+      ansible.builtin.systemd:
+        name: cbprom-exporter
+        enabled: true
+        state: started
+        daemon_reload: true
+      tags: [install]
+
+    - name: Install cbd-enroll systemd unit
+      ansible.builtin.copy:
+        src: cbd-enroll.service
+        dest: /etc/systemd/system/cbd-enroll.service
+        owner: root
+        group: root
+        mode: "0644"
+      notify:
+        - reload systemd
+        - restart cbd-enroll
+      tags: [install]
+
+    - name: Patch __VENV__ placeholder in cbd-enroll unit
+      ansible.builtin.replace:
+        path: /etc/systemd/system/cbd-enroll.service
+        regexp: __VENV__
+        replace: "{{ cbprom_venv_dir }}"
+      notify:
+        - reload systemd
+        - restart cbd-enroll
+      tags: [install]
+
+    - name: Enable + start cbd-enroll
+      ansible.builtin.systemd:
+        name: cbd-enroll
+        enabled: true
+        state: started
+        daemon_reload: true
+      tags: [install]
+
+    # ─── Alloy scrape target ──────────────────────────────────────────────
+    # Drops the file_sd target next to the UC96 one in /etc/alloy/.
+    # The local Alloy install on server-host reads `app-metrics-*.yml`
+    # directly from the alloy config dir, not a `scrape-targets/`
+    # subdirectory — confirmed by listing /etc/alloy/ which has
+    # app-metrics-{litellm,nvidia,ollama,uc96}.yml as flat files.
+    - name: Install Alloy scrape target
+      ansible.builtin.template:
+        src: templates/app-metrics-cbprom.yml.j2
+        dest: /etc/alloy/app-metrics-cbprom.yml
+        owner: root
+        group: alloy
+        mode: "0644"
+      notify: reload alloy
+      tags: [alloy]
+
+    # The enroll signer exposes its own metrics port (Prometheus). Scrape it so
+    # enrollment failures / sub-CA expiry are alertable (chytra-budka.alerts.yml).
+    - name: Install Alloy scrape target (cbd-enroll)
+      ansible.builtin.template:
+        src: templates/app-metrics-enroll.yml.j2
+        dest: /etc/alloy/app-metrics-enroll.yml
+        owner: root
+        group: alloy
+        mode: "0644"
+      notify: reload alloy
+      tags: [alloy]
+
+  handlers:
+    - name: reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: restart cbprom
+      ansible.builtin.systemd:
+        name: cbprom-exporter
+        state: restarted
+
+    - name: restart cbd-enroll
+      ansible.builtin.systemd:
+        name: cbd-enroll
+        state: restarted
+
+    - name: reload alloy
+      ansible.builtin.systemd:
+        name: alloy
+        state: reloaded

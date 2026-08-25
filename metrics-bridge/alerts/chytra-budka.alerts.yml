@@ -1,0 +1,163 @@
+# Chytrá Budka — Prometheus/Mimir alerting rules (config-as-code).
+#
+# These were previously only "described" in OBSERVABILITY.md as click-configured
+# Grafana alerts — unversioned and unrecoverable. This file is the source of
+# truth. Load it into the Mimir ruler:
+#   mimirtool rules load --address=<mimir> --id=<tenant> metrics-bridge/alerts/*.yml
+# or import into Grafana-managed alerting. See README.md here for the rationale,
+# the SLOs (chytra-budka.slo.rules.yml), and the metric inventory.
+#
+# severity label convention:
+#   page   = a human should be woken / notified now (user-visible outage)
+#   ticket = look when convenient (degraded, not down)
+#
+# Metric names are produced by metrics-bridge/cbprom.py (cb_* prefix) and
+# enroll.py (cbd_enroll_*). Relay rules need the relay scrape target on the
+# birdnet host (see README) — they no-op until then.
+
+groups:
+  - name: chytra-budka-example-2ice
+    rules:
+      - alert: BudkaOffline
+        expr: cb_online == 0
+        for: 15m
+        labels: {severity: page}
+        annotations:
+          summary: "Budka {{ $labels.device_name }} offline"
+          description: "MQTT LWT marked {{ $labels.device }} offline for >15m
+            (dead battery, crashed pre-MQTT, or AP gone)."
+
+      - alert: BudkaFleetSilent
+        # Dead-man's switch: NO device telemetry at all. Catches the bridge or
+        # broker being down, or every board gone, which per-device BudkaOffline
+        # can't (its series also stops updating).
+        expr: absent_over_time(cb_online[30m])
+        for: 0m
+        labels: {severity: page}
+        annotations:
+          summary: "No budka telemetry in 30m — bridge/broker down or whole fleet gone"
+
+      - alert: BudkaCrashLoop
+        expr: cb_consecutive_crashes >= 3
+        for: 0m
+        labels: {severity: page}
+        annotations:
+          summary: "Budka {{ $labels.device_name }} crash-looping ({{ $value }} consecutive boots)"
+
+      - alert: BudkaCameraStalled
+        # The product-level SLI: a board that is "online + ok" but whose camera
+        # is wedged (every capture failing) is the worst silent failure.
+        expr: cb_cam_stalled == 1
+        for: 10m
+        labels: {severity: page}
+        annotations:
+          summary: "Budka {{ $labels.device_name }} camera wedged — captures failing"
+
+      - alert: BudkaMicStalled
+        expr: cb_mic_stalled == 1
+        for: 10m
+        labels: {severity: ticket}
+        annotations:
+          summary: "Budka {{ $labels.device_name }} mic stopped delivering frames"
+
+      - alert: BudkaPhotoQueueDropping
+        # Retry FIFO overflowing = offline longer than the 8-slot buffer →
+        # captures are being lost (only a counter records it).
+        expr: rate(cb_photo_queue_dropped_total[1h]) > 0
+        for: 0m
+        labels: {severity: ticket}
+        annotations:
+          summary: "Budka {{ $labels.device_name }} dropping queued photos (outage exceeded buffer)"
+
+      - alert: BudkaSdNearFull
+        expr: cb_sd_free_percent < 10
+        for: 30m
+        labels: {severity: ticket}
+        annotations:
+          summary: "Budka {{ $labels.device_name }} SD {{ $value | printf \"%.0f\" }}% free"
+
+      - alert: BudkaBatteryCritical
+        expr: cb_battery_soc_percent < 15
+        for: 10m
+        labels: {severity: page}
+        annotations:
+          summary: "Budka {{ $labels.device_name }} battery {{ $value | printf \"%.0f\" }}% SOC"
+
+      - alert: BudkaMeterStale
+        # External BLE UC96 power meter stopped reporting. The cb_meter_* gauges
+        # FLATLINE at their last value when the budka loses the BLE link (the
+        # bridge keeps exposing the last sample), so a value check can't detect
+        # it — only the freshness stamp can. 15m without a fresh sample = gone.
+        expr: time() - cb_meter_last_seen_timestamp_seconds > 900
+        for: 5m
+        labels: {severity: ticket}
+        annotations:
+          summary: "Budka {{ $labels.device_name }} BLE meter {{ $labels.name }}
+            ({{ $labels.meter }}) stale (>15m, no reading)"
+
+      - alert: BudkaOtaFailed
+        expr: cb_ota_ok == 0
+        for: 5m
+        labels: {severity: ticket}
+        annotations:
+          summary: "Budka {{ $labels.device_name }} last OTA reported error"
+
+      - alert: BudkaPirWedged
+        expr: cb_pir_wedged == 1
+        for: 30m
+        labels: {severity: ticket}
+        annotations:
+          summary: "Budka {{ $labels.device_name }} PIR stuck HIGH"
+
+      - alert: BudkaDegraded
+        expr: cb_selftest_components_ok < cb_selftest_components_total
+        for: 1h
+        labels: {severity: ticket}
+        annotations:
+          summary: "Budka {{ $labels.device_name }} selftest degraded ({{ $value }} ok)"
+
+  - name: chytra-budka-services
+    rules:
+      - alert: CbpromExporterDown
+        expr: up{job="cbprom_exporter"} == 0
+        for: 5m
+        labels: {severity: page}
+        annotations:
+          summary: "cbprom MQTT→Prometheus bridge down — fleet metrics are blind"
+
+      - alert: CbdEnrollDown
+        expr: up{job="cbd_enroll"} == 0
+        for: 10m
+        labels: {severity: ticket}
+        annotations:
+          summary: "cbd-enroll signer down — factory-reset/new boards can't get TLS certs"
+
+      - alert: EnrollSubCaExpiringSoon
+        # Once the sub-CA lapses, no board can enroll or renew. 14d warning.
+        expr: (cbd_enroll_sub_ca_not_after_timestamp_seconds - time()) < 14 * 86400
+        for: 1h
+        labels: {severity: page}
+        annotations:
+          summary: "Enrollment sub-CA expires in < 14 days — rotate it"
+
+      - alert: EnrollFailures
+        expr: rate(cbd_enroll_requests_total{result=~"error|csr_invalid"}[15m]) > 0
+        for: 15m
+        labels: {severity: ticket}
+        annotations:
+          summary: "Enrollment signer rejecting/erroring CSRs"
+
+      - alert: RelayDown
+        # Needs the relay scrape target on the birdnet host (README).
+        expr: up{job="chytra_budka_relay"} == 0
+        for: 10m
+        labels: {severity: ticket}
+        annotations:
+          summary: "Audio relay down — BirdNET RTSP feed stopped"
+
+      - alert: RelayFfmpegFlapping
+        expr: rate(chytra_relay_ffmpeg_exits_total[15m]) > 0.1
+        for: 15m
+        labels: {severity: ticket}
+        annotations:
+          summary: "Relay ffmpeg restarting repeatedly — RTSP pipeline unstable"

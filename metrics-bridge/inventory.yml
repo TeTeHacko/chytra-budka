@@ -1,0 +1,16 @@
+---
+# Chytrá Budka MQTT → Prometheus bridge — inventory (jen hosty; tunables v group_vars/)
+#
+# Single host today; the daemon is a centralized translator (one
+# instance scrapes the broker for every budka on it), unlike the UC96
+# exporter which needs one daemon per BT-adjacent host.
+#
+# Colocated on server-host so the existing Alloy scrape job picks it up
+# at 127.0.0.1:9878 with no remote firewall hop.
+
+all:
+  children:
+    cbprom_exporters:
+      hosts:
+        server-host:
+          ansible_connection: local

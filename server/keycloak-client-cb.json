@@ -1,0 +1,29 @@
+{
+  "//": "Keycloak client for the Chytrá Budka manager, realm example.com. PUBLIC",
+  "//public": "client (PKCE, no secret) — matches the operator-provided config.",
+  "//manager": "Manager env: CB_OIDC_CLIENT_ID=cb.example.com, no oidc_client_secret.",
+  "clientId": "cb.example.com",
+  "name": "Chytrá Budka manager",
+  "protocol": "openid-connect",
+  "enabled": true,
+  "publicClient": true,
+  "standardFlowEnabled": true,
+  "implicitFlowEnabled": false,
+  "directAccessGrantsEnabled": false,
+  "serviceAccountsEnabled": false,
+  "redirectUris": [
+    "https://cb.example.com/auth/oidc/callback"
+  ],
+  "webOrigins": [
+    "https://cb.example.com"
+  ],
+  "attributes": {
+    "pkce.code.challenge.method": "S256",
+    "post.logout.redirect.uris": "https://cb.example.com/*"
+  },
+  "defaultClientScopes": [
+    "openid",
+    "profile",
+    "email"
+  ]
+}

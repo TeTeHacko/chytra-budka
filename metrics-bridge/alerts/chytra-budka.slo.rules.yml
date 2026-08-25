@@ -1,0 +1,57 @@
+# Chytrá Budka — SLI recording rules + SLO burn alerts (config-as-code).
+#
+# Until now every metric was raw with no objective attached. These rules define
+# the user-facing SLIs and the SLO targets to measure against. Load alongside
+# chytra-budka.alerts.yml (mimirtool rules load / Grafana). See README.md.
+#
+# SLOs (per device, rolling 30 days):
+#   1. Availability   — device MQTT-reachable           ≥ 99 %
+#   2. Image delivery — produces captures while awake    ≥ 95 % of awake hours
+#                       have at least one capture (proxy; refine with daylight)
+#   3. Health         — selftest required-components ok   ≥ 99 % of the time
+#
+# Error budget: 1 % of 30 d ≈ 7.2 h/month of allowed unavailability per board.
+
+groups:
+  - name: chytra-budka-sli-recording
+    interval: 1m
+    rules:
+      # Availability SLI — fraction of the window the LWT shows online.
+      - record: cb:device_availability:ratio1h
+        expr: avg_over_time(cb_online[1h])
+      - record: cb:device_availability:ratio30d
+        expr: avg_over_time(cb_online[30d])
+
+      # Capture-activity SLI — captures/hour. Zero while awake (mode != safe and
+      # not crash-looping) is the "alive but not delivering" signal.
+      - record: cb:photo_capture:rate1h
+        expr: rate(cb_photo_capture_total[1h])
+
+      # Health SLI — fraction of selftest components passing right now.
+      - record: cb:selftest_healthy:ratio
+        expr: cb_selftest_components_ok / cb_selftest_components_total
+
+  - name: chytra-budka-slo-burn
+    rules:
+      # Availability SLO miss over 30 d (target 99 %). Ticket, not page — it's a
+      # trailing-window budget breach, reviewed, not an acute outage (those page
+      # via BudkaOffline). Pages would come from a fast-burn multiwindow rule;
+      # for a 2-board fleet the trailing breach + the acute alerts suffice.
+      - alert: BudkaAvailabilitySLOMiss
+        expr: cb:device_availability:ratio30d < 0.99
+        for: 1h
+        labels: {severity: ticket}
+        annotations:
+          summary: "Budka {{ $labels.device_name }} 30d availability {{ $value | printf \"%.3f\" }} < 0.99 SLO"
+
+      # Awake but not capturing for an hour — the image-delivery SLI failing.
+      # Gated on "not safe mode" so an intentionally-idle low-battery box doesn't
+      # trip it. (cb_mode_info carries the mode label.)
+      - alert: BudkaNotCapturingWhileAwake
+        expr: |
+          cb:photo_capture:rate1h == 0
+          and on(device) (cb_mode_info{mode="continuous"} == 1 or cb_mode_info{mode="triggered"} == 1)
+        for: 2h
+        labels: {severity: ticket}
+        annotations:
+          summary: "Budka {{ $labels.device_name }} awake but produced no captures in 2h"

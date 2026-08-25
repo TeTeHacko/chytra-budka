@@ -1,0 +1,39 @@
+# Relay config for the budka stack — container variant of relay/relay.toml.
+# Differences from the systemd deployment: mediamtx is a sibling container
+# (not 127.0.0.1), and inbound POSTs arrive via nginx from the docker subnet,
+# so the allowlist keeps its RFC1918 defaults (docker nets are 172.16/12).
+
+[server]
+listen = "0.0.0.0:8765"
+auth_token_env = "RELAY_AUTH_TOKEN"
+
+[mediamtx]
+rtsp_host = "mediamtx"
+rtsp_port = 8554
+
+[ffmpeg]
+binary = "/usr/bin/ffmpeg"
+input_format = "s16le"
+sample_rate = 16000
+channels = 2
+output_codec = "pcm_s16be"
+output_sample_rate = 48000
+output_channels = 1
+
+# The CIDR allowlist is wide open here ON PURPOSE: in the stack the relay is
+# never published on the host — the only route in is nginx on the internal
+# docker network (whose subnet varies per daemon address pool, e.g. 198.18/15
+# on some hosts, so enumerating it would be fragile), and the source IP the
+# relay sees is nginx's, not the device's. Authentication is the Bearer token;
+# network isolation is compose's. The systemd deployment (relay/relay.toml)
+# keeps its RFC1918 allowlist because there the port is host-exposed.
+[defaults]
+allowed_ips = ["0.0.0.0/0", "::/0"]
+gap_silence_seconds = 30
+idle_timeout_seconds = 10
+total_timeout_seconds = 0
+
+[streams.chytra-budka]
+allowed_ips = ["0.0.0.0/0", "::/0"]
+gap_silence_seconds = 30
+idle_timeout_seconds = 10

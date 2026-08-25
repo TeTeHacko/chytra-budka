@@ -1,0 +1,13 @@
+#!/bin/sh
+# /usr/local/bin/esp32-port-name
+# Extract USB bus-port from kernel DEVPATH for udev PROGRAM
+# Input: %p (e.g. /devices/.../usb7/7-13/7-13:1.0/tty/ttyACM1)
+# Output: usb7p13 (for symlink /dev/esp32-usb7p13)
+busport=$(echo "$1" | grep -oP 'usb\d+/\K\d+-\d+' | head -1)
+if [ -n "$busport" ]; then
+  bus="${busport%%-*}"
+  port="${busport##*-}"
+  echo "usb${bus}p${port}"
+else
+  exit 1
+fi

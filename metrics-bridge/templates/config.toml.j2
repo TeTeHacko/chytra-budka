@@ -1,0 +1,66 @@
+# Chytrá Budka MQTT → Prometheus bridge — Configuration
+# Managed by Ansible — do not edit manually.
+#
+# Subscribes to the broker, normalizes per-device state/* topics into
+# Prometheus metrics on the exporter port. See `cbprom.py` source for
+# the full topic catalog. New firmware topics auto-light up once added
+# to METRICS in cbprom.py (no config change needed here).
+
+[mqtt]
+host = "{{ cbprom_mqtt_host | default('192.0.2.5') }}"
+port = {{ cbprom_mqtt_port | default(1883) }}
+# Credentials live in a 0600 file owned by the cbprom user so the
+# password isn't in the world-readable config.toml. Daemon reads each
+# *_path file once at startup. If the daemon user can't read them, the
+# next startup logs "Permission denied" — quick to spot.
+user_path     = "{{ cbprom_config_dir }}/mqtt_user"
+password_path = "{{ cbprom_config_dir }}/mqtt_pass"
+
+[exporter]
+port = {{ cbprom_listen_port | default(9878) }}
+
+# ─── cbd-enroll signer ──────────────────────────────────────────────────────
+# Read by enroll.py (cbd-enroll.service). Points at the sub-CA cert +
+# key deployed by roles/ansible_ca/tasks/sub_ca_budka.yml. Operator
+# checks /etc/ansible-ca exists + is group-readable by `ssl-cert`
+# (cbprom user is added to that group at deploy time).
+
+[ca]
+cert_path     = "{{ cbd_ca_cert_path | default('/etc/ansible-ca/sub_ca_budka.pem') }}"
+key_path      = "{{ cbd_ca_key_path  | default('/etc/ansible-ca/sub_ca_budka.key') }}"
+validity_days = {{ cbd_validity_days | default(90) }}
+# Permitted name suffixes — must match the sub-CA's nameConstraints
+# (see sub_ca_budka.yml). The signer rejects CSRs asking for names
+# outside this list before they reach the CA, so a misconfigured CN
+# fails fast with a clean MQTT-side log line.
+permitted_suffixes = [".lan", ".lan", ".local"]
+
+# ─── Device friendly-label registry ─────────────────────────────────────────
+# Maps the MAC suffix (last 3 bytes as `<ab>_<cd>`) to a human-readable
+# name. Metrics get tagged with BOTH `device=<mactail>` (stable, always
+# unique) and `device_name=<friendly>` (joinable with UC96 + HA labels).
+# Unmapped tails fall back to `device_name=<mactail>` so a freshly-added
+# board still shows up without a config redeploy.
+
+[devices]
+{% for tail, name in cbprom_devices.items() %}
+"{{ tail }}" = "{{ name }}"
+{% endfor %}
+{% if not cbprom_devices %}
+# No devices configured. The bridge will still scrape every budka on
+# the broker; only the friendly `device_name` label will fall back to
+# the MAC suffix. Add entries like:
+#   "ex01" = "budka-example-2"
+#   "ex02" = "budka-example-1"
+{% endif %}
+
+# ─── BLE meter friendly-label registry ──────────────────────────────────────
+# Maps an external UC96 meter's BT MAC (lowercase, no colons — exactly as the
+# firmware publishes it under meter/<mac>/…) to a human-readable `name` label
+# on cb_meter_*. Same names as power-meter/config.toml. Unmapped meters fall
+# back to name=<MAC> so a newly-paired meter still graphs without a redeploy.
+
+[meters]
+{% for mac, name in (cbprom_meters | default({})).items() %}
+"{{ mac }}" = "{{ name }}"
+{% endfor %}

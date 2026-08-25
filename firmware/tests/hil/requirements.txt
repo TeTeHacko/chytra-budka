@@ -1,0 +1,34 @@
+# Phase A HIL harness — host-side dependencies.
+#
+# Install with:
+#   python -m venv .venv && . .venv/bin/activate
+#   pip install -r firmware/tests/hil/requirements.txt
+#
+# Pinning rationale: paho-mqtt and httpx are stable mature libs, so
+# bound to a major version. Pinning exactly would create churn on every
+# pip install; leaving open creates surprise regressions. Major-only
+# upper bounds catch breaking API changes.
+
+pytest>=8.0,<9
+# Auto-retry transient failures: this is HW-over-WiFi, so a normally-fast op
+# occasionally spikes past its per-call timeout. pytest.ini sets --reruns 2 so
+# a transient flake doesn't red the deploy gate (a genuine fault fails all 3).
+pytest-rerunfailures>=14,<17
+paho-mqtt>=2.1,<3
+httpx>=0.27,<1
+# JPEG sweep test (test_jpeg_sweep.py) computes sharpness + edge density
+# per frame and generates center crops shown 1:1 in the HTML viewer.
+# Used only by the @manual sweep test; CI host suite doesn't pull this.
+pillow>=10.0,<12
+numpy>=1.26,<3
+# test_tls_enrollment.py — parses the bench's leaf cert to verify CN.
+# Optional: the test prints DER size as a fallback if missing, so a
+# minimal HIL install doesn't have to pull cryptography.
+cryptography>=43,<46
+# AP-mode provisioning on a DISPLAY-equipped bench: an unprovisioned boot with
+# an OLED uses a per-boot RANDOM SoftAP password (see wifi_mgr_use_random_ap_pass),
+# which the serial-free harness can't otherwise know. conftest reads it from the
+# bench's local console (the firmware echoes it there in AP mode only). Optional:
+# without pyserial the AP join falls back to CB_AP_PASS / the compiled default
+# (correct for a display-less bench).
+pyserial>=3.5,<4

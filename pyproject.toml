@@ -1,0 +1,37 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = [
+    "firmware/build",
+    "firmware/managed_components",
+    "firmware/hw/.history",
+    "firmware/hw/__pycache__",
+    "relay/__pycache__",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "W",   # pycodestyle warnings
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+    "RUF", # ruff-specific
+]
+ignore = [
+    "E501",   # line too long — handled by `ruff format`
+    "B008",   # function call in default argument (common in aiohttp)
+    "RUF001", # ambiguous unicode in strings (× in argparse help / EE notes — intentional)
+    "RUF002", # ambiguous unicode in docstrings (× / − are intentional in EE notes)
+    "RUF003", # ambiguous unicode in comments (× and − are intentional in EE notes)
+    "SIM105", # try/except/pass — explicit form is clearer in async cleanup paths
+    "SIM115", # open() without `with` — fine in short-lived stream scripts
+]
+
+[tool.ruff.lint.per-file-ignores]
+"firmware/hw/*.py" = ["F405", "F403", "B007"]  # SKiDL star imports + tuple-iter idioms
+
+[tool.ruff.format]
+quote-style = "double"

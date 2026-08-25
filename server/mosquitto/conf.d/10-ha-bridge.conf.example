@@ -1,0 +1,15 @@
+# OPTIONAL: bridge to the legacy HA Mosquitto add-on during (and after) the
+# fleet migration — keeps HA dashboards and the old broker's consumers alive
+# while devices move over one by one.
+#
+# Activate by copying to 10-ha-bridge.conf (drop the .example suffix) and
+# filling in the credentials of the legacy shared MQTT account.
+#
+# connection ha-legacy
+# address 192.0.2.5:1883
+# remote_username CHANGE_ME
+# remote_password CHANGE_ME
+# topic # both 0
+# try_private true
+# cleansession false
+# restart_timeout 10

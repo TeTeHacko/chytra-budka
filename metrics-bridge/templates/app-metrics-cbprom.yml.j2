@@ -1,0 +1,10 @@
+# Chytrá Budka MQTT→Prom bridge — Alloy scrape target (file_sd format).
+# Managed by Ansible — do not edit manually.
+#
+# Drops into the same /etc/alloy/scrape-targets/ dir that the UC96
+# exporter target lives in, so Alloy's existing local.file_match picks
+# it up without a river config change.
+- targets:
+    - "127.0.0.1:{{ cbprom_listen_port | default(9878) }}"
+  labels:
+    job: "cbprom_exporter"

@@ -1,0 +1,28 @@
+# sdkconfig.defaults.field — field/production runtime hardening for the
+# OTA-deployed fleet image. Pairs with signed_soft (signed OTA, no eFuse) to
+# produce ONE image that both boards accept:
+#   - bench ex01 (soft signed-OTA) enforces the signature via signed_soft
+#   - field ex02 (hardware Secure Boot) enforces it via the bootloader
+# A signed_soft app runs fine under the SB bootloader, so no separate build.
+#
+# Build the fleet image:
+#   idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.esp32s3;sdkconfig.defaults.signed_soft;sdkconfig.defaults.field" \
+#          -DSDKCONFIG=build-field/sdkconfig -B build-field set-target esp32s3 build
+#   firmware/tools/sign_with_yubikey.sh build-field      # vault touch
+#   (then upload the signed build-field/chytra-budka.bin to the OTA server)
+
+# Operator/debug HTTP endpoints OFF in the field (attack surface).
+CONFIG_CHYTRA_BUDKA_DEBUG_ENDPOINTS=n
+# Slow OTA poll for deployed units (6 h) instead of the 5-min dev cadence.
+CONFIG_CHYTRA_BUDKA_OTA_PERIOD_S=21600
+# Partition table offset (0x10000) is now set fleet-wide in the BASE
+# sdkconfig.defaults so EVERY profile (incl. bench) matches — see the rationale
+# there. (A board still on the old 0x8000 layout must be USB-reflashed to
+# 0x10000 before it can take this image.)
+
+# Coredump-over-MQTT shipper stays OFF on the fleet image: it was observed
+# task_wdt'ing a weak-link field unit while shipping ~42 KB in ~21 QoS-1 chunks
+# (saturating the link destabilized the board). Flawless on the bench's fast
+# link, but NOT slow-link-safe yet. Re-enable only after hardening (smaller
+# chunks, slower pacing, lower prio, byte cap — see Kconfig help).
+# CONFIG_CHYTRA_BUDKA_SHIP_COREDUMP is not set

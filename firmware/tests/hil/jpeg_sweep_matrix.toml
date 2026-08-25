@@ -1,0 +1,42 @@
+# JPEG sweep matrix — test_jpeg_sweep.py iterates this product per device,
+# per profile. framesizes map directly to esp_camera framesize_t enum;
+# qualities are libjpeg-style "lower = better, larger". frames_per_combo is
+# how many shots to take at each (fs, q) point (variance check + lets the
+# operator pick a sharp frame out of a series).
+#
+# devices.<mactail>.ip is optional — if missing, the test discovers the IP
+# from the device's retained <id>/state/ip topic. Required for the stream
+# variant (HTTP); the still variant can run MQTT-only.
+
+[matrix]
+framesizes = [5, 8, 9, 10, 12, 13]      # QVGA, VGA, SVGA, XGA, SXGA, UXGA
+qualities = [8, 12, 16, 20, 28]
+frames_per_combo = 3
+
+[defaults]
+# Restored in test teardown (finally block, even on failure).
+cam_framesize = 13                       # UXGA
+cam_quality = 12
+mjpg_framesize = 9                       # SVGA
+mjpg_quality = 18
+
+# Bench only. The field unit used to be listed here, back when the suite
+# authenticated with the shared MQTT password and could therefore reach every
+# board. It now uses a certificate whose ACL is scoped to the bench, so a sweep
+# against ex02 fails at the broker — deliberately: this sweep rewrites
+# cam_framesize/cam_quality and fires a few hundred captures, which is not
+# something a test run should be doing to a deployed box.
+#
+# To sweep the field on purpose, do it as an operator with the fleet-wide
+# identity rather than by widening the test rig's:
+#   CB_MQTT_CERT=server/secrets/ops-fleet.pem \
+#   CB_MQTT_KEY=server/secrets/ops-fleet.key \
+#   pytest test_jpeg_sweep.py
+# …with the device re-added below for that run only. Note the defaults above are
+# restored in teardown, so an aborted sweep can leave the board on sweep values.
+[devices.ex01]
+name = "bench"
+# No `ip` on purpose — it is resolved from the retained <id>/state/ip. The value
+# pinned here used to be 198.51.100.104, which is the HIL HOST's own wireless
+# address, not the board's (the bench answers on .90). Every HTTP leg of the
+# sweep was therefore talking to the machine running the test.

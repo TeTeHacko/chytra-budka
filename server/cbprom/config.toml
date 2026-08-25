@@ -1,0 +1,25 @@
+# cbprom in the budka stack — mirrors metrics-bridge/templates/config.toml.j2
+# (the Ansible-deployed variant on server-host), pointed at the stack broker.
+# No [ca] section: enrollment lives in the manager here, not in cbd-enroll.
+
+[mqtt]
+host = "mosquitto"
+port = 1883
+user_path     = "/etc/cb-prom/mqtt_user"
+password_path = "/etc/cb-prom/mqtt_pass"
+
+[exporter]
+port = 9878
+
+# Friendly-label registries — same content as metrics-bridge/group_vars/
+# cbprom_exporters/vars.yml. Unmapped tails/MACs fall back to the id itself,
+# so a fresh board still shows up without a config change.
+
+[devices]
+"ex01" = "budka-example-2"
+"ex02" = "budka-example-1"
+
+[meters]
+"aabbcc000002" = "solar-example-1"
+"aabbcc000001" = "budka-example-1"
+"aabbcc000003" = "budka-example-2"

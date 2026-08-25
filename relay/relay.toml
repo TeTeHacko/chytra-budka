@@ -1,0 +1,35 @@
+[server]
+listen = "0.0.0.0:8765"
+auth_token_env = "RELAY_AUTH_TOKEN"
+
+[mediamtx]
+rtsp_host = "127.0.0.1"
+rtsp_port = 8554
+
+[ffmpeg]
+binary = "/usr/bin/ffmpeg"
+# Input format — matches what ESP32 sends on the wire.
+# These are defaults; if the client POSTs a Content-Type header with
+# rate= and channels= parameters (RFC 3190 audio/L16), those override.
+input_format = "s16le"
+sample_rate = 16000
+channels = 2
+
+# Output: BirdNET-Go wants 48 kHz mono PCM.  pcm_s16be is the correct
+# codec for RTP L16 (RFC 3551 mandates network byte order = big-endian).
+output_codec = "pcm_s16be"
+output_sample_rate = 48000   # resample for BirdNET-Go (0 = same as input)
+output_channels = 1          # downmix stereo → mono (0 = same as input)
+
+# Per-stream tuning. If a stream name is POSTed that has no [streams.<name>]
+# section, the [defaults] block applies.
+[defaults]
+allowed_ips = ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "::1/128"]
+gap_silence_seconds = 30
+idle_timeout_seconds = 10
+total_timeout_seconds = 0  # 0 = unlimited
+
+[streams.chytra-budka]
+allowed_ips = ["192.168.0.0/16", "10.0.0.0/8", "127.0.0.0/8"]
+gap_silence_seconds = 30
+idle_timeout_seconds = 10

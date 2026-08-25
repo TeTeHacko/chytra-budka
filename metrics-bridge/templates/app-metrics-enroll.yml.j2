@@ -1,0 +1,10 @@
+# Chytrá Budka enrollment signer — Alloy scrape target (file_sd format).
+# Managed by Ansible — do not edit manually.
+#
+# enroll.py exposes Prometheus metrics on its own port (default 9879) on the
+# same host as cbprom. Drops next to app-metrics-cbprom.yml in /etc/alloy/ so
+# Alloy's existing local.file_match picks it up with no river change.
+- targets:
+    - "127.0.0.1:{{ cbd_enroll_metrics_port | default(9879) }}"
+  labels:
+    job: "cbd_enroll"

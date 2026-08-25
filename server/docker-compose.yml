@@ -1,0 +1,175 @@
+# Chytra budka — standalone server stack
+#
+# Phase 0 services: nginx (TLS edge), certbot (ACME), mosquitto (MQTTS + mTLS),
+# certs-init (placeholder certs so the stack starts before Let's Encrypt runs).
+# Later phases add: manager (FastAPI), relay, mediamtx, cbprom, observability profile.
+#
+# Quickstart: see README.md. Everything configurable lives in .env (copy .env.example).
+
+name: budka
+
+services:
+  certs-init:
+    build: ./toolbox
+    restart: "no"
+    command: /scripts/ensure-certs.sh
+    environment:
+      BUDKA_DOMAIN: ${BUDKA_DOMAIN:?set BUDKA_DOMAIN in .env}
+    volumes:
+      - certs:/certs
+      - ./scripts/ensure-certs.sh:/scripts/ensure-certs.sh:ro
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      certs-init:
+        condition: service_completed_successfully
+    ports:
+      - "${HTTP_BIND:-0.0.0.0}:${HTTP_PORT:-80}:80"
+      - "${HTTPS_BIND:-0.0.0.0}:${HTTPS_PORT:-443}:443"
+    environment:
+      BUDKA_DOMAIN: ${BUDKA_DOMAIN}
+    volumes:
+      - ./nginx/templates:/etc/nginx/templates:ro
+      - ./nginx/docker-entrypoint.d/90-cert-reload.sh:/docker-entrypoint.d/90-cert-reload.sh:ro
+      - certs:/certs:ro
+      - acme-webroot:/srv/acme:ro
+      - ota:/srv/ota:ro
+      - ${BUDKA_SECRETS_DIR:-./secrets}/ota_htpasswd:/etc/nginx/ota_htpasswd:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  certbot:
+    image: certbot/certbot:latest
+    restart: unless-stopped
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - >
+        trap exit TERM;
+        while :; do
+          certbot renew --webroot -w /srv/acme --deploy-hook /scripts/deploy-certs.sh;
+          sleep 12h & wait $$!;
+        done
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - acme-webroot:/srv/acme
+      - certs:/certs
+      - ./scripts/deploy-certs.sh:/scripts/deploy-certs.sh:ro
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    depends_on:
+      certs-init:
+        condition: service_completed_successfully
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    ports:
+      - "${MQTT_TLS_BIND:-0.0.0.0}:${MQTT_TLS_PORT:-8883}:8883"
+      - "${MQTT_OPS_BIND:-0.0.0.0}:${MQTT_OPS_PORT:-8884}:8884"
+      # 1883 (plaintext, service accounts) is docker-network internal only — never published.
+    volumes:
+      - ./mosquitto/entrypoint.sh:/entrypoint.sh:ro
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/acl-devices.conf:/mosquitto/config/acl-devices.conf:ro
+      - ./mosquitto/acl-services.conf:/mosquitto/config/acl-services.conf:ro
+      - ./mosquitto/conf.d:/mosquitto/config/conf.d:ro
+      - ${BUDKA_SECRETS_DIR:-./secrets}/mosquitto_passwd:/mosquitto/secrets/passwd:ro
+      - ${BUDKA_SECRETS_DIR:-./secrets}/svc_health_pass:/mosquitto/secrets/svc_health_pass:ro
+      - ${BUDKA_SECRETS_DIR:-./secrets}/ca_chain.pem:/mosquitto/pki/ca_chain.pem:ro
+      - certs:/certs:ro
+      - mosquitto-data:/mosquitto/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          mosquitto_sub -p 1883 -u svc-health -P "$$(cat /mosquitto/secrets/svc_health_pass)"
+          -t '$$SYS/broker/uptime' -C 1 -W 5 -i "hc-$$$$"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  relay:
+    build: ../relay
+    restart: unless-stopped
+    expose:
+      - "8765"
+    volumes:
+      - ./relay/relay.toml:/etc/chytra-budka/relay.toml:ro
+      - ${BUDKA_SECRETS_DIR:-./secrets}/relay_token:/secrets/relay_token:ro
+    depends_on:
+      - mediamtx
+
+  mediamtx:
+    image: bluenviron/mediamtx:1.15.0
+    restart: unless-stopped
+    ports:
+      # RTSP read for the external BirdNET-Go (runs beside the stack).
+      - "${RTSP_BIND:-127.0.0.1}:${RTSP_PORT:-8554}:8554"
+    expose:
+      - "8888"   # HLS (future in-UI audio player, proxied by nginx)
+      - "9997"   # API (internal diagnostics)
+    volumes:
+      - ./mediamtx/mediamtx.yml:/mediamtx.yml:ro
+
+  cbprom:
+    build:
+      context: ../metrics-bridge
+    restart: unless-stopped
+    ports:
+      # Scraped by the host Alloy (file_sd app-metrics convention) or the
+      # in-stack prometheus profile; loopback by default.
+      - "${METRICS_BIND:-127.0.0.1}:${CBPROM_PORT:-9878}:9878"
+    volumes:
+      - ./cbprom/config.toml:/etc/cb-prom/config.toml:ro
+      - ./cbprom/mqtt_user:/etc/cb-prom/mqtt_user:ro
+      - ${BUDKA_SECRETS_DIR:-./secrets}/svc_cbprom_pass:/etc/cb-prom/mqtt_pass:ro
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+
+  manager:
+    build: ./manager
+    restart: unless-stopped
+    expose:
+      - "8080"
+    environment:
+      CB_DB_URL: ${CB_DB_URL:-sqlite+aiosqlite:////data/budka.db}
+      CB_ENROLL_MODE: ${CB_ENROLL_MODE:-https}
+      TZ: ${TZ:-Europe/Prague}
+      # Operator auth: password (default) | oidc (any OIDC issuer, e.g.
+      # Keycloak: create a confidential client with redirect URI
+      # https://budka.<dom>/auth/oidc/callback and mount the client secret
+      # as ${BUDKA_SECRETS_DIR}/oidc_client_secret) | off (dev only).
+      CB_AUTH_MODE: ${CB_AUTH_MODE:-password}
+      CB_PUBLIC_BASE_URL: ${CB_PUBLIC_BASE_URL:-https://budka.${BUDKA_DOMAIN}}
+      CB_OIDC_ISSUER: ${CB_OIDC_ISSUER:-}
+      CB_OIDC_CLIENT_ID: ${CB_OIDC_CLIENT_ID:-budka}
+      CB_OIDC_ALLOWED_USERS: ${CB_OIDC_ALLOWED_USERS:-}
+    volumes:
+      - manager-data:/data
+      - ota:/ota
+      - photos:/photos
+      - ${BUDKA_SECRETS_DIR:-./secrets}/sub_ca_budka.pem:/secrets/sub_ca_budka.pem:ro
+      - ${BUDKA_SECRETS_DIR:-./secrets}/sub_ca_budka.key:/secrets/sub_ca_budka.key:ro
+      - ${BUDKA_SECRETS_DIR:-./secrets}/ota_token:/secrets/ota_token:ro
+      - ${BUDKA_SECRETS_DIR:-./secrets}/ingest_token:/secrets/ingest_token:ro
+      - ${BUDKA_SECRETS_DIR:-./secrets}/svc_manager_pass:/secrets/svc_manager_pass:ro
+      - ${BUDKA_SECRETS_DIR:-./secrets}/operator_password:/secrets/operator_password:ro
+      - ${BUDKA_SECRETS_DIR:-./secrets}/session_secret:/secrets/session_secret:ro
+    depends_on:
+      mosquitto:
+        condition: service_healthy
+
+volumes:
+  certs:
+  letsencrypt:
+  acme-webroot:
+  mosquitto-data:
+  ota:
+  photos:
+  manager-data:

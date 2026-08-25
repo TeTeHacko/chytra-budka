@@ -1,0 +1,181 @@
+# ESP32-S3 specific overrides.
+
+# ─── Chip ─────────────────────────────────────────────────────────────────
+CONFIG_IDF_TARGET="esp32s3"
+
+# ─── Flash & PSRAM (XIAO ESP32-S3 = N8R8: 8 MB flash + 8 MB octal PSRAM) ──
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_TYPE_AUTO=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+# Part of the BLE memory diet (see the BLE section below): push small heap
+# allocations to PSRAM (default forces everything ≤16 KB internal) so the BT
+# controller — which can live ONLY in internal DRAM — has room when BLE is on.
+# Task stacks + explicit MALLOC_CAP_DMA/INTERNAL allocs are unaffected.
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096
+# Carve out a dedicated internal-DRAM reserve that the PSRAM-backed allocator
+# won't hand to PSRAM-eligible requests, so internal-only callers — HW-AES DMA
+# buffers during TLS handshakes, the BT controller, WiFi DMA — keep headroom
+# under concurrent load. Default ~8 KB was too tight: `esp-aes: Failed to
+# allocate memory` showed up when BLE-on + multiple TLS handshakes fragmented
+# the internal heap. 16 KB without starving the pool when BLE shrinks it.
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=16384
+
+# ─── Multicore: keep net tasks off the audio core (CPU1) ─────────────────
+# audio_task runs pinned to CPU1 at prio 10 for the 32 ms PDM cadence. The
+# lwIP TCP/IP task ("tiT") defaults to NO_AFFINITY at prio 18 — if the
+# scheduler ever places it on CPU1 it PREEMPTS audio (18 > 10) and jitters the
+# pump. Pin it to CPU0 with WiFi/MQTT/httpd so the audio core stays clean.
+CONFIG_LWIP_TCPIP_TASK_AFFINITY_CPU0=y
+
+# ─── USB-Serial-JTAG console (XIAO S3 native USB) ────────────────────────
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG_ENABLED=y
+
+# ─── CPU clock ────────────────────────────────────────────────────────────
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# ─── Power management — UNIVERSAL light-sleep (one FW for all units) ───
+# Auto light-sleep is compiled into every image. Behaviour is MODE-driven (cb_pm.c
+# + apply_power_state): Continuous/Triggered hold a NO_LIGHT_SLEEP lock while audio
+# runs → full power, full function (mains units); Safe (audio off) → the SoC
+# light-sleeps between WiFi DTIM wakes (~0.40 W, ~-57%) while staying reachable +
+# PIR->photo. So the same FW runs full on mains and deep-saves on solar — the mode
+# (mode_override / future SOC-auto) picks. Runtime `pm_lightsleep` knob default ON.
+#
+# DFS stays OFF: it drops APB → LCD_CAM XCLK below the OV3660 min → SCCB NACK.
+# cb_pm.c pins min==max==240 (no scaling). Light sleep stops clocks entirely, so
+# camera_capture_event drains a few frames post-wake to clear the torn first frame.
+#
+# task_wdt: PM+tickless perturbs the idle-task TWDT feed → reboot. Fixed by NOT
+# watching the idle tasks (below); every hot-path task still esp_task_wdt_add(NULL).
+# Tick stays at the stock 100 Hz (no global timing change); the saving-mode poll-
+# lengthening (app_lowpower_active) makes the idle gaps clear the sleep threshold.
+# NOTE: light sleep needs BLE OFF (the BT controller blocks it + NimBLE's ~90 KB
+# starves the I2S DMA) — low-power units run ble_enabled=OFF (the default).
+#
+# CPU power-down in light sleep is DISABLED: it allocates CPU-retention RAM on every
+# sleep entry, and under active load (TLS handshakes, captures) that competes with
+# the working heap → "sleep_cpu_configure: Failed to enable CPU power down" → OOM →
+# task_wdt crash-loop (caught by the HIL gate 2026-06-11). Clock-gating without
+# CPU power-down is a few mW dearer but stable. Hence pm_lightsleep also DEFAULTS
+# OFF (opt-in per unit) — see app_config.c.
+CONFIG_PM_ENABLE=y
+CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
+CONFIG_FREERTOS_IDLE_TIME_BEFORE_SLEEP=3
+CONFIG_PM_LIGHTSLEEP_TICK_OVERFLOW_PROTECTION=y
+# CONFIG_PM_POWER_DOWN_CPU_IN_LIGHT_SLEEP is not set
+# CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0 is not set
+# CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1 is not set
+# CONFIG_ESP_SLEEP_POWER_DOWN_FLASH is not set
+# CONFIG_PM_DFS_INIT_AUTO is not set
+
+# ─── FATFS Long File Name ─────────────────────────────────────────────
+# Default is 8.3 filenames which rejects our timestamp+MAC+trigger
+# scheme ("/sdcard/20260522-150019_fb_70_8c_http.jpg"). Heap-backed
+# LFN buffer keeps DRAM usage flat (allocated on demand).
+# CONFIG_FATFS_LFN_NONE is not set
+CONFIG_FATFS_LFN_HEAP=y
+CONFIG_FATFS_MAX_LFN=255
+CONFIG_FATFS_API_ENCODING_UTF_8=y
+
+# ─── WiFi ─────────────────────────────────────────────────────────────────
+CONFIG_ESP_WIFI_ENABLE_WPA3_SAE=y
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=32
+CONFIG_ESP_WIFI_DYNAMIC_TX_BUFFER_NUM=32
+CONFIG_ESP_WIFI_AMPDU_TX_ENABLED=y
+CONFIG_ESP_WIFI_AMPDU_RX_ENABLED=y
+# STATIC RX/TX buffers are DMA → internal-only DRAM. Trimmed from 10/16 as part
+# of the BLE memory diet (BT controller is internal-only): a low-throughput
+# bird-box doesn't need them all, and this frees ~20 KB internal. RX_BA_WIN
+# must be ≤ 2× STATIC_RX or the build #errors. Bench-validated (provision/MQTT/
+# OTA stable); applies even with BLE off, which is the one WiFi-relevant change.
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=6
+CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=8
+CONFIG_ESP_WIFI_RX_BA_WIN=6
+
+# ─── 24/7 robustness — WDT, panic, core dump ─────────────────────────────
+# Field deployment can't tolerate silent hangs. The bench session on
+# .104 wedged with no panic dump (HTTP server task stack overflow took
+# down USB-CDC before any output flushed). The pipeline below makes
+# the firmware reboot itself when something is wrong, and persist
+# enough crash info that the next boot can ship it via MQTT.
+
+# Main loop subscribes to TWDT (esp_task_wdt_add) and resets each
+# iteration. If audio_pump / sensor read / mqtt publish ever hang
+# longer than this window we get a forced reboot instead of a brick.
+# 30 s is comfortable for an HTTPS OTA pull and SD writes at boot.
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=30
+
+# When TWDT fires, panic with a full register/stack dump instead of
+# the default "log a warning and keep going". Combined with the
+# coredump partition below this gets us a postmortem after a hang.
+CONFIG_ESP_TASK_WDT_PANIC=y
+
+# Event task default stack 2.3 KB is tight for the WiFi → IP → MQTT
+# subscribe chain. Bump to 4 KB so the chain has headroom.
+CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096
+
+# Persist panic register frames + task stacks to the `coredump` flash
+# partition (see partitions.csv). On the next boot we can pull it back
+# via esp_core_dump_image_check + ship a summary to MQTT. ELF format
+# can be parsed by espcoredump.py off the device.
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+# IDF v6.0.1 auto-selects the ELF format + a SHA256 checksum when
+# ENABLE_TO_FLASH is set (espcoredump/Kconfig `select`s them). The old explicit
+# DATA_FORMAT_ELF=y / CHECKSUM_CRC32=y lines are gone in v6 (CRC32 was dropped)
+# and were emitting "unknown kconfig symbol" warnings every build — removed.
+# esp-coredump auto-detects the checksum, so off-device decode is unaffected.
+CONFIG_ESP_COREDUMP_MAX_TASKS_NUM=32
+
+# ─── BLE meter reading (firmware/BLE.md) ─────────────────────────────────
+# Compiled into EVERY image (bench + field) so it's one canonical build; the
+# runtime stays gated by the `ble_enabled` NVS knob (default OFF). With it OFF
+# the BT controller is never initialised (ble_start() gates nimble_port_init),
+# so an image behaves byte-for-byte like one without BLE until it's flipped on
+# — which makes shipping it to the field low-risk. Flip ble_enabled=ON only
+# once a board is stable and watch diag/selftest int_free/dma_free, because the
+# BT controller lives ONLY in internal DRAM (the WiFi/SPIRAM diet above claws
+# that back). NimBLE (not Bluedroid): central+observer only — we scan/connect,
+# never advertise — with SW coexistence so WiFi keeps RF priority.
+CONFIG_CHYTRA_BUDKA_BLE=y
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_BT_NIMBLE_ROLE_CENTRAL=y
+CONFIG_BT_NIMBLE_ROLE_OBSERVER=y
+CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=n
+CONFIG_BT_NIMBLE_ROLE_BROADCASTER=n
+CONFIG_ESP_COEX_SW_COEXIST_ENABLE=y
+# BT controller + NimBLE host pools. A scanning central that connects to a few
+# meters at once (field rig = panel→UC96→powerbank→UC96→Xiao); MAX_ACT covers
+# scan + the simultaneous connections + margin, no big duplicate cache
+# (filter_dup=0), up to 3 meters connected, each a modest notify stream.
+#
+# Buffer counts TRIMMED to free internal DRAM (these pools live in internal SRAM
+# only) so the HTTP camera tasks' per-request stacks (12 KB /capture, 8 KB stream)
+# can still be allocated with BLE on — otherwise the BT controller fragments
+# internal DRAM to a ~2-3 KB largest block and xTaskCreate fails (see the camera
+# notes). MAX_CONNECTIONS stays 3 (don't drop the meter count); only the per-
+# connection ACL / MSYS / transport queue depths shrink — fine for the UC96's
+# low-rate 36-byte notify frames.
+CONFIG_BT_CTRL_BLE_MAX_ACT=5
+CONFIG_BT_CTRL_SCAN_DUPL_CACHE_SIZE=10
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=3
+CONFIG_BT_NIMBLE_ACL_BUF_COUNT=6
+CONFIG_BT_NIMBLE_MSYS_2_BLOCK_COUNT=4
+CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=6
+CONFIG_BT_NIMBLE_TRANSPORT_EVT_COUNT=8
+
+# Allow PSRAM-backed task stacks (xTaskCreatePinnedToCoreWithCaps + MALLOC_CAP_SPIRAM).
+# The per-request HTTP camera tasks (/capture 12 KB, /stream 8 KB) take their stacks
+# from PSRAM so they can be created even when BLE-on has fragmented internal DRAM to a
+# ~2-3 KB largest block (an internal stack alloc fails there). Default y on S3; pinned
+# here so the build doesn't silently lose it. Those tasks do camera + TLS only — no
+# flash ops — so they never touch their stack while the cache is disabled.
+CONFIG_FREERTOS_TASK_CREATE_ALLOW_EXT_MEM=y

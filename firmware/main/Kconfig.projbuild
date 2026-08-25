@@ -1,0 +1,227 @@
+menu "Chytrá Budka"
+
+    config CHYTRA_BUDKA_DEBUG_ENDPOINTS
+        bool "Enable HTTP debug endpoints (/debug/*)"
+        default n
+        help
+            Compile in and register debug HTTP endpoints under /debug/*
+            that can intentionally crash the board (force a TWDT hang or
+            kick WiFi) or wipe the SD card so the panic / backoff /
+            recovery pipelines can be exercised from a development
+            laptop.
+
+            Default is OFF — these endpoints have NO authentication and
+            `/debug/sd_format?confirm=yes` is a typo guard, not auth. A
+            board on a routable LAN with these compiled in can be
+            wedged or wiped by any client that can reach port 80.
+
+            Enable explicitly for bench work via
+            `sdkconfig.defaults.bench` overlay or per-invocation
+            `idf.py menuconfig`. Field builds MUST leave this off.
+
+            When disabled, neither the handlers nor their registration
+            are compiled — the `/debug/*` URIs return 404 and the
+            wifi_mgr_force_disconnect / debug_hang_main_for_ms symbols
+            are still linkable but unreachable from the network.
+
+    config CHYTRA_BUDKA_SHIP_COREDUMP
+        bool "Ship a saved coredump over MQTT on boot"
+        default n
+        help
+            When a coredump is present in flash after a crash, publish it
+            (base64, chunked) to <id>/diag/coredump/* on the next boot once
+            MQTT is up, so a unit's panic can be symbolized off-device. The ship
+            runs in its own task spawned at MQTT-connect. Reassemble host-side
+            with tools/coredump_recv.py and decode against the ELF
+            tools/ota_upload.sh archived for that version.
+
+            DEFAULT OFF — opt-in (overlay `=y` / menuconfig), bench / fast-link
+            use only. It is NOT slow-link-safe: a field unit on a weak link was
+            observed to task_wdt while shipping ~42 KB in ~21 QoS-1 chunks
+            (saturating the link destabilized the board). It's flawless on the
+            bench's fast link. Before enabling on a field box, harden it for
+            slow links (smaller chunks, much slower pacing/trickle, lower task
+            priority, total-bytes cap) — until then, leave it OFF in the field
+            (signed_soft / production) profiles.
+
+    config CHYTRA_BUDKA_OTA_PERIOD_S
+        int "OTA poll period (seconds)"
+        default 300
+        range 60 86400
+        help
+            How often the OTA task polls the artifact server for a
+            newer firmware. Default 300 s (5 minutes) is good for
+            bench iteration; production / field deployments should
+            raise to 21600 (6 h) via sdkconfig.defaults.production
+            to cut WiFi traffic + battery use during long autonomous
+            runs.
+
+            The previous arrangement hard-coded 5 min in config.h
+            with a "production: 6h" comment that never matched
+            reality through four review cycles. Pulling the knob
+            into Kconfig makes the production-vs-dev split a single
+            sdkconfig line, not a code-comment promise.
+
+    config CHYTRA_BUDKA_NET_WATCHDOG_S
+        int "Network watchdog: reboot after MQTT down this long (s, 0=off)"
+        default 600
+        range 0 86400
+        help
+            If MQTT stays disconnected for this many seconds continuously,
+            self-reboot to recover. esp-mqtt auto-reconnects internally, but
+            when the network stack wedges — e.g. socket exhaustion under load,
+            observed on the bench during heavy concurrent OTA + photo-upload
+            traffic where ALL outbound TCP connects fail and the reconnect
+            loops forever — there is no escape without a reboot.
+
+            Consecutive watchdog reboots run through diag_pre_boot_fail_set(),
+            so they count toward the safe-mode trip + ramped reboot delay: a
+            transient device wedge recovers in one reboot, while a genuine
+            multi-hour broker/network outage ramps down instead of tight-
+            looping. The timer resets whenever MQTT is connected, so this only
+            fires on a CONTINUOUS outage.
+
+            0 disables it. Default 600 s (10 min).
+
+    config CHYTRA_BUDKA_WIFI_CAND_VERIFY_S
+        int "WiFi candidate: stable MQTT seconds before promote"
+        default 45
+        range 5 600
+        help
+            When a new WiFi credential set is staged (cmd/wifi or the SoftAP
+            form), it boots as a CANDIDATE. It is promoted to the new
+            known-good only after the control plane (IP + MQTT) has been
+            connected continuously for this many seconds — the same "can
+            still receive a corrective OTA" bar the OTA mark-valid uses.
+            Must be < WIFI_CAND_VERIFY_TIMEOUT_S.
+
+    config CHYTRA_BUDKA_WIFI_CAND_VERIFY_TIMEOUT_S
+        int "WiFi candidate: revert + reboot if no MQTT within (s)"
+        default 240
+        range 20 1200
+        help
+            If a candidate credential set does not reach MQTT within this
+            many seconds, it is auto-reverted to the last known-good set and
+            the board reboots. This is the anti-brick guarantee: a wrong
+            SSID/password pushed to an OTA-only field board recovers itself
+            with no physical access. Keep generous enough for a slow AP +
+            broker connect: on a weak link (measured ~-94 dBm) DHCP alone took
+            ~48 s and MQTT ~a minute, and promotion needs a further
+            WIFI_CAND_VERIFY_S of continuous MQTT — so a 120 s budget left
+            almost no margin and one MQTT flap would revert GOOD creds.
+            Default 240 s gives a marginal link room to settle.
+
+    config CHYTRA_BUDKA_WIFI_CAND_MAX_TRIES
+        int "WiFi candidate: max boot attempts before auto-revert"
+        default 3
+        range 1 10
+        help
+            Cross-boot backstop for a candidate that associates + reaches
+            MQTT but then panics/reboots before the verify window elapses.
+            After this many boots with the same pending candidate, it is
+            dropped at boot (before WiFi init) and known-good is used. Held
+            in RTC slow memory, so it survives esp_restart()/panic and
+            resets on power loss.
+
+    config CHYTRA_BUDKA_NET_CAND_VERIFY_S
+        int "Endpoint candidate: stable MQTT seconds before promote"
+        default 45
+        range 5 600
+        help
+            When new network endpoints (broker URI/credentials) are staged
+            via cmd/endpoint, they boot as a CANDIDATE (net_store.c, same
+            ladder as WiFi candidates). Promoted to known-good only after
+            MQTT has been connected continuously for this many seconds —
+            proving the NEW broker actually carries the control plane.
+            Must be < NET_CAND_VERIFY_TIMEOUT_S.
+
+    config CHYTRA_BUDKA_NET_CAND_VERIFY_TIMEOUT_S
+        int "Endpoint candidate: revert + reboot if no MQTT within (s)"
+        default 240
+        range 20 1200
+        help
+            If a staged endpoint candidate does not reach MQTT within this
+            many seconds, it is auto-reverted and the board reboots back to
+            the known-good (or compile-default) broker. Anti-brick guarantee
+            for re-pointing an OTA-only field board at a new broker. Same
+            sizing rationale as WIFI_CAND_VERIFY_TIMEOUT_S (slow links need
+            margin).
+
+    config CHYTRA_BUDKA_NET_CAND_MAX_TRIES
+        int "Endpoint candidate: max boot attempts before auto-revert"
+        default 3
+        range 1 10
+        help
+            Cross-boot backstop for an endpoint candidate that connects but
+            then panics/reboots before the verify window elapses. Counted in
+            NVS (net_cfg namespace), cleared on promote/revert.
+
+    config CHYTRA_BUDKA_TLS_INSECURE
+        bool "Dev-stack TLS: skip server certificate verification (BENCH ONLY)"
+        default n
+        depends on CHYTRA_BUDKA_DEBUG_ENDPOINTS
+        help
+            Disables server certificate verification for outbound TLS to
+            the server stack — the mqtts:// broker connection AND the
+            HTTPS enrollment POST — so the bench can talk to a local dev
+            stack with a self-signed certificate. Requires
+            ESP_TLS_INSECURE + ESP_TLS_SKIP_SERVER_CERT_VERIFY. NEVER
+            enable on field or production builds — those verify via the
+            esp_crt_bundle (public CA, e.g. Let's Encrypt).
+
+    config CHYTRA_BUDKA_WIFI_SOFTAP_TRIGGER_S
+        int "WiFi SoftAP fallback: launch after no-IP for (s, 0=off)"
+        default 600
+        range 0 7200
+        help
+            If the station cannot obtain an IP for this many continuous
+            seconds AND no candidate is pending, bring up a time-limited
+            WPA2 SoftAP serving a minimal /wifi config form so an operator
+            can re-provision a sealed field box with no physical access.
+            0 disables the SoftAP fallback. Default 600 s (10 min) avoids
+            burning battery on a brief AP outage. The AP defeats WiFi
+            modem-sleep while up, so it is strictly time-bounded by
+            WIFI_SOFTAP_MAX_S.
+
+    config CHYTRA_BUDKA_BOOT_BUTTON_RESET
+        bool "BOOT button (GPIO0) long-press = full factory reset"
+        default y
+        help
+            Monitor the XIAO BOOT button (GPIO0) at RUNTIME — held ≥10 s it
+            triggers a full factory reset (config defaults + TLS re-enroll +
+            WiFi back to the compile default), then reboots. The onboard LED
+            blinks while held (past ~3 s) and goes solid on commit so an
+            accidental hold is noticeable before it fires.
+
+            GPIO0 is also a strapping pin, but it's read only after boot (the
+            strap is already latched), so this never collides with the ROM
+            download-mode selection. It does NOT conflict with the D0–D7 pin
+            function map (those are GPIO1–6/43/44).
+
+            Bench/serviceable recovery: the BOOT button is on the bare PCB and
+            is typically NOT exposed through a sealed field enclosure — the
+            SoftAP fallback is what recovers a sealed unit without access.
+            Disable for field builds that want no physical reset path.
+
+    config CHYTRA_BUDKA_WIFI_SOFTAP_MAX_S
+        int "WiFi SoftAP fallback: max uptime before reboot (s)"
+        default 600
+        range 60 7200
+        help
+            Maximum time the SoftAP fallback stays up before the board
+            reboots to re-enter the station-connect ladder. Bounds the
+            radio-on power cost of the AP. Default 600 s (10 min).
+
+    config CHYTRA_BUDKA_BLE
+        bool "BLE meter reading (NimBLE, opt-in)"
+        default n
+        help
+            Compile in the optional BLE subsystem (see firmware/BLE.md): scan +
+            detect BLE meters (Atorch UC96 power meter, BTHome sensors), with
+            WiFi given absolute RF priority. Requires CONFIG_BT_ENABLED +
+            CONFIG_BT_NIMBLE_ENABLED + SW coexistence in the same sdkconfig
+            (the bench overlay turns all of it on). When OFF, ble.c compiles to
+            no-op stubs and none of the NimBLE stack is built — zero cost.
+            Runtime is still gated by the `ble_enabled` NVS knob (default off).
+
+endmenu

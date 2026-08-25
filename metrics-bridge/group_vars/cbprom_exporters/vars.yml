@@ -1,0 +1,28 @@
+---
+# Chytrá Budka MQTT → Prometheus bridge — tunables
+
+cbprom_mqtt_host: "192.0.2.5"
+cbprom_mqtt_port: 1883
+cbprom_listen_port: 9878
+cbprom_venv_dir: /opt/cb-prom-exporter
+cbprom_config_dir: /etc/cb-prom
+cbprom_user: cbprom
+cbprom_group: cbprom
+
+# Friendly-label registry — same naming as the UC96 power meters
+# (power-meter/group_vars/uc96_exporters/vars.yml::uc96_meter_names) so a
+# Grafana panel can join `cb_*{device_name="budka-example-1"}` with
+# `uc96_power_watts{device="budka-example-1"}` cleanly.
+cbprom_devices:
+  # mactail (device_id "cb-<mactail>") → friendly device_name.
+  "ex01": "budka-example-2"
+  "ex02": "budka-example-1"
+
+# External BLE UC96 meter MAC (lowercase, no colons — as the firmware
+# publishes it under meter/<mac>/…) → friendly name. Same names as
+# power-meter/config.toml.j2 so cb_meter_*{name=…} and the legacy uc96_*
+# series line up. Unmapped meters fall back to name=<MAC>.
+cbprom_meters:
+  "aabbcc000002": "solar-example-1"
+  "aabbcc000001": "budka-example-1"
+  "aabbcc000003": "budka-example-2"

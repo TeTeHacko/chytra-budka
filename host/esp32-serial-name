@@ -1,0 +1,5 @@
+#!/bin/sh
+# /usr/local/bin/esp32-serial-name
+# Transform ESP32 MAC serial (aa:bb:cc:dd:ee:02) -> lowercase no-colon (aabbccddee02)
+# Called by udev PROGRAM, outputs the transformed name for use in SYMLINK
+echo "$1" | tr -d ':' | tr 'A-F' 'a-f'

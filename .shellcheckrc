@@ -1,0 +1,6 @@
+enable=all
+# SC2312 — invoke-expression-not-assigned, too noisy in pipelines
+# SC2250 — style nit requiring ${var} braces everywhere
+# SC2292 — style preference for [[ ]] over [ ]
+# SC2310 — set -e disabled for function inside if/|| — same noisy family as SC2312
+disable=SC2312,SC2250,SC2292,SC2310

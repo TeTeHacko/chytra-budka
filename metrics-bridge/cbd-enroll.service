@@ -1,0 +1,48 @@
+# Chytrá Budka MQTT enrollment signer (cbd-enroll) — systemd unit
+# Managed by Ansible — do not edit manually.
+
+[Unit]
+Description=Chytrá Budka MQTT enrollment signer
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=cbprom
+# `ssl-cert` group membership grants read on /etc/ansible-ca/sub_ca_budka.key
+# (deployed mode 0640 root:ssl-cert by roles/ansible_ca/tasks/sub_ca_budka.yml).
+# The user's primary group stays cbprom; ssl-cert is supplementary.
+Group=cbprom
+SupplementaryGroups=ssl-cert
+ExecStart=__VENV__/bin/python __VENV__/bin/enroll.py --config /etc/cb-prom/config.toml
+Restart=always
+RestartSec=5
+
+# Hardening — same shape as cbprom-exporter.service, with two extras:
+#  * ReadOnlyPaths adds /etc/ansible-ca so the signer can read the key.
+#    The CA dir is otherwise NOT writable by us.
+#  * No StandardOutput override — journal default catches every signed
+#    cert log line for audit (operator can grep for "signed cert" to
+#    rebuild a fleet inventory of issued certs from journalctl alone).
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/etc/cb-prom /etc/ansible-ca
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
