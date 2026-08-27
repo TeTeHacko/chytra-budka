@@ -1,0 +1,12 @@
+{
+  "_comment": "JLCPCB fab preset for chytra-budka carrier board. 2-layer, lead-free HASL, green soldermask.",
+  "layer_count": 2,
+  "thickness": "1.6mm",
+  "soldermask": "green",
+  "silkscreen": "white",
+  "surface_finish": "HASL_LEAD_FREE",
+  "copper_weight": "1oz",
+  "min_via": "0.3mm/0.6mm",
+  "min_track": "0.15mm",
+  "include_3d_models": false
+}

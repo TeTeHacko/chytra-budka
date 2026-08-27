@@ -1,0 +1,22 @@
+# ota.<domain>: static firmware artifacts, HTTP Basic auth (same user/password
+# contract as the legacy ota.example.com vhost so fielded firmware keeps working
+# across the DNS cutover). Served directly by nginx from the shared volume so
+# the fleet rescue path survives a broken manager deploy.
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ota.${BUDKA_DOMAIN};
+
+    ssl_certificate     /certs/le/fullchain.pem;
+    ssl_certificate_key /certs/le/privkey.pem;
+
+    root /srv/ota;
+    autoindex off;
+
+    auth_basic           "chytra-budka";
+    auth_basic_user_file /etc/nginx/ota_htpasswd;
+
+    location / {
+        try_files $uri =404;
+    }
+}

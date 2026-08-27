@@ -1,0 +1,16 @@
+# cbprom dependencies — installed into /opt/cb-prom-exporter via Ansible.
+# Same major bounds as firmware/tests/hil/requirements.txt so a host
+# running both daemons can share a pyenv if anyone ever wants to.
+
+paho-mqtt>=2.1,<3
+prometheus_client>=0.20,<1
+# tomli only needed on Python 3.10 and below — 3.11+ has tomllib in stdlib.
+# Listed conditionally so newer hosts skip the install.
+tomli>=2.0,<3; python_version < "3.11"
+
+# cbd-enroll signer (enroll.py): cryptography for CSR parsing, EC
+# P-256 keypair handling, and X.509 cert issuance. The sub-CA itself
+# is created in Ansible (community.crypto.x509_certificate) — here we
+# only need to sign leaf certs at runtime. v43+ for the API stability
+# guarantees around CertificateBuilder.add_extension.
+cryptography>=43,<46

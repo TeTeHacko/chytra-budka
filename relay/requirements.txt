@@ -1,0 +1,7 @@
+# Upper-bounded so a transitive major bump can't silently swap the HTTP
+# server (aiohttp) under us between deploys. For a fully reproducible install,
+# generate a hashed lock on the deploy host:
+#   pip-compile --generate-hashes requirements.txt -o requirements.lock
+#   pip install --require-hashes -r requirements.lock
+aiohttp>=3.9,<4
+prometheus-client>=0.20,<1

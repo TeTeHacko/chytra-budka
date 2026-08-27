@@ -1,0 +1,51 @@
+## STL build artifacts
+*.stl
+*.png
+
+## OpenSCAD
+*.bak
+
+## Editor
+.vscode/
+*.swp
+*~
+
+## Secrets / keys — never commit
+## firmware/.gitignore already lists main/secrets.h; this root rule
+## catches any future module-local secrets.h and protects against a
+## `git add -A` from the repo root that would otherwise miss the
+## firmware-level rule on a typo.
+**/secrets.h
+**/secrets.local.h
+.secrets/
+
+## Build/tool outputs that should stay local
+firmware/sdkconfig.prod
+
+## timelapse-tooling outputs — generated MP4s (100+ MB each) and their
+## contact-sheet JPEGs. Per-run artefacts rebuilt from the archive on
+## demand; never source. Patterns are dir-agnostic (runs default to cwd).
+timelapse_*.mp4
+timelapse_*_sheet.jpg
+
+## Runtime / rotating logs — host-side processes (HA-MCP server,
+## ad-hoc diagnostic scripts) drop into logs/. Per-host operational
+## output, not source. Previously committed copies leaked IPv6
+## addresses + Python tracebacks; tracked copies removed via
+## `git rm --cached` alongside this rule.
+logs/
+
+## Per-host IDE/agent scratch
+.clangd
+.opencode/
+
+## HIL test artifacts — JPEG sweep + ad-hoc capture output. ~6 MB and
+## up; not source. Test runs produce a fresh dated subdir per sha so
+## tracking would just balloon the history.
+firmware/tests/hil/output/
+
+## firmware-test-max17048/ is a 144 MB ESP-IDF diagnostic sandbox left
+## over from the 2026-05 fuel-gauge investigation. The conclusion was
+## "switch to INA226 + SOC FSM" so this tree is no longer load-bearing
+## — kept locally as field-investigation reference but never committed.
+firmware-test-max17048/

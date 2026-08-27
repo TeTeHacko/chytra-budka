@@ -1,0 +1,30 @@
+# Audio HW variants for the HIL — firmware/tests/hil/test_audio.py
+#
+# Audio is hardware-shaped: which breakout pads carry the buzzer / PCM "1-bit
+# DAC", and what's physically wired to them (speaker, RC filter + amp), changes
+# between bench sessions. So the HIL is matrix-driven and you tell it what's
+# wired RIGHT NOW; only that variant's test runs, the rest skip — once a variant
+# is tested and unplugged you simply stop selecting it, and the suite never
+# touches a config that isn't on the bench.
+#
+#   CB_HIL_NO_RESET=1 CB_BENCH_IP=<ip> CB_AUDIO_WIRED=<name> \
+#       pytest -m manual firmware/tests/hil/test_audio.py
+#
+# Pads are XIAO-ESP32-S3 breakout names (d0..d7); the test maps them to GPIOs
+# (d0=1 d1=2 d2=3 d3=4 d4=5 d5=6 d6=43 d7=44) and asserts /selftest reports each
+# backend initialised on the expected GPIO. Edit the pads to match how YOU wired
+# it. Add variants freely — each is just a pin-map. A backend left unset is
+# expected to be unmapped (gpio -1).
+
+[variants.buzzer_d3]
+desc = "buzzer/speaker (LEDC) on D3; nothing on the PCM DAC"
+buzzer = "d3"
+
+[variants.pcm_d0]
+desc = "PCM 1-bit DAC (RC low-pass + amp) on D0; no buzzer"
+pcm = "d0"
+
+[variants.both]
+desc = "buzzer on D3 AND PCM DAC on D0 — both connected at once"
+buzzer = "d3"
+pcm = "d0"

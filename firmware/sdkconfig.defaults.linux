@@ -1,0 +1,15 @@
+# ESP-IDF Linux host target overrides.
+# Used when:  idf.py --preview set-target linux
+#
+# On linux target most chip-specific peripherals (I²S, WiFi, eFuse, etc.) are
+# stubbed; we only validate that FSM, MQTT, HTTP client and crypto compile +
+# run against host mosquitto / curl.
+
+CONFIG_IDF_TARGET="linux"
+
+# Power management / FreeRTOS — uses pthreads on linux, no DFS.
+# CONFIG_PM_ENABLE=n
+# CONFIG_FREERTOS_USE_TICKLESS_IDLE=n
+
+# No partition table on linux.
+# CONFIG_PARTITION_TABLE_CUSTOM=n

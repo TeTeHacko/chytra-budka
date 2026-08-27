@@ -1,0 +1,19 @@
+# YubiKey / HSM external signing overlay.
+#
+# Stack on top of the production overlay:
+#   idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;\
+#sdkconfig.defaults.esp32s3;sdkconfig.defaults.production;\
+#sdkconfig.defaults.production_yubikey" -B build-prod build
+#
+# This produces UNSIGNED bootloader + app binaries. Sign them externally
+# with `tools/sign_with_yubikey.sh` before flashing (RSA-3072 PSS from the
+# YubiKey-gated age vault — see firmware/README.md).
+#
+# Prerequisites: the canonical signing key exists and its public half is at
+# keys/cb_secure_boot_signing_key_pub.pem (extracted by espsecure).
+
+# Build unsigned — IDF only embeds the public-key digest into the bootloader.
+CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES=n
+
+# Public-key-only PEM (no private material on disk).
+CONFIG_SECURE_BOOT_SIGNING_KEY="keys/cb_secure_boot_signing_key_pub.pem"

@@ -1,0 +1,7 @@
+.env
+secrets/
+.venv/
+manager/web/node_modules/
+manager/web/dist/
+__pycache__/
+manager/budka_manager.egg-info/

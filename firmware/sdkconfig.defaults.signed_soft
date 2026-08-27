@@ -1,0 +1,42 @@
+# sdkconfig.defaults.signed_soft — "soft" signed-OTA overlay (NO eFuse burn).
+#
+# This is the REVERSIBLE counterpart to sdkconfig.defaults.production (which
+# enables hardware Secure Boot + flash encryption and burns eFuses on first
+# flash — irreversible). This overlay only requires that OTA images be SIGNED;
+# it never burns anything and the board can always be re-flashed with an
+# unsigned build over USB.
+#
+# Trust model (RSA Secure Boot v2 scheme, verify-on-update):
+#   - The bootloader is NOT verified and the app is NOT verified on boot
+#     (so the board always boots — robustness). SECURE_SIGNED_ON_BOOT is RSA-N/A.
+#   - The RUNNING app verifies the signature of any OTA image before accepting
+#     it (esp_ota_* APIs). The trust anchor is the RSA-3072 public key embedded
+#     in the running app's own signature block. So once a board runs a build
+#     signed by our key, every future OTA must be signed by the SAME key.
+#   - We build UNSIGNED here and sign externally with the YubiKey-gated vault
+#     (firmware/tools/sign_with_yubikey.sh) — the private key is never on disk
+#     during the build.
+#
+# Build (bench only — field stays unsigned, see HTTPS.md / signing notes).
+# NOTE the `-DSDKCONFIG=build-signed/sdkconfig`: idf.py writes sdkconfig to the
+# PROJECT dir by default, which would clobber the shared firmware/sdkconfig with
+# these signed settings. Isolating it to the build dir keeps the dev build clean.
+#   idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.esp32s3;sdkconfig.defaults.signed_soft" \
+#          -DSDKCONFIG=build-signed/sdkconfig -B build-signed set-target esp32s3 build
+#   firmware/tools/sign_with_yubikey.sh build-signed
+#   firmware/tools/flash_safe.sh ...   (or idf.py -B build-signed flash)
+#
+# Do NOT put these in sdkconfig.defaults: SECURE_SIGNED_ON_UPDATE is a one-way
+# property of the running app, and the field board (ex02) must keep receiving
+# unsigned-config images. Only the bench build pulls this overlay.
+
+CONFIG_SECURE_SIGNED_APPS_NO_SECURE_BOOT=y
+CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME=y
+CONFIG_SECURE_SIGNED_ON_UPDATE_NO_SECURE_BOOT=y
+
+# Sign externally (vault), not during the build — no private key on disk.
+CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES=n
+
+# Explicitly keep hardware Secure Boot + flash encryption OFF (no eFuse burn).
+CONFIG_SECURE_BOOT=n
+CONFIG_SECURE_FLASH_ENC_ENABLED=n

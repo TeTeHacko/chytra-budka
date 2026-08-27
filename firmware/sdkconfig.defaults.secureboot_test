@@ -1,0 +1,34 @@
+# sdkconfig.defaults.secureboot_test — RECOVERABLE hardware Secure Boot v2 test.
+#
+# Burns eFuses on first boot (SECURE_BOOT_EN + the RSA-3072 public-key digest)
+# — that part is IRREVERSIBLE. But it deliberately does NOT enable Flash
+# Encryption and does NOT disable the ROM/USB download mode, so the board can
+# still be USB-reflashed afterwards **with a signed image** (recovery requires
+# the vault signing key). This is the sane config for a *first* real SB test,
+# unlike sdkconfig.defaults.production (which adds FE + DL-disable = no recovery).
+#
+# External signing: binaries build UNSIGNED here and are signed off-host with
+# the YubiKey-gated vault (CB_SIGN_BOOTLOADER=1 firmware/tools/sign_with_yubikey.sh).
+#
+# Build (isolated sdkconfig so the dev/field configs stay clean):
+#   idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.esp32s3;sdkconfig.defaults.secureboot_test" \
+#          -DSDKCONFIG=build-sb/sdkconfig -B build-sb set-target esp32s3 build
+#   CB_SIGN_BOOTLOADER=1 firmware/tools/sign_with_yubikey.sh build-sb   # signs bootloader + app
+
+CONFIG_SECURE_BOOT=y
+CONFIG_SECURE_BOOT_V2_ENABLED=y
+CONFIG_SECURE_SIGNED_APPS_RSA_SCHEME=y
+
+# Sign externally with the vault — no private key on the build host.
+CONFIG_SECURE_BOOT_BUILD_SIGNED_BINARIES=n
+
+# Keep the board recoverable: NO flash encryption, do NOT disable download mode.
+CONFIG_SECURE_FLASH_ENC_ENABLED=n
+CONFIG_SECURE_DISABLE_ROM_DL_MODE=n
+CONFIG_SECURE_BOOT_ALLOW_JTAG=n
+
+# Partition table offset (0x10000) now comes from the BASE sdkconfig.defaults
+# (fleet-wide) — the signed Secure Boot bootloader overflows the stock 0x8000
+# head, which is exactly why base standardised on 0x10000. No override needed
+# here anymore. Keeping INFO bootloader logs on purpose — diagnostics for the
+# first eFuse burn.

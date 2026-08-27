@@ -1,0 +1,25 @@
+# KiCad backups + autosave
+*-backups/
+_autosave-*
+*.kicad_sch-bak
+*.kicad_pcb-bak
+*.kicad_prl
+fp-info-cache
+
+# KiCad caches
+*.bak
+~*.lck
+
+# Build output
+out/
+
+# SKiDL artifacts
+generate_schematic.log
+generate_schematic.erc
+generate_schematic_sklib.py
+erc.txt
+__pycache__/
+.history/
+
+
+test*-erc.rpt

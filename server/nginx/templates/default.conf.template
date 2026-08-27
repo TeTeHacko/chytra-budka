@@ -1,0 +1,18 @@
+# Port 80: ACME HTTP-01 webroot for all hostnames + health endpoint + redirect to HTTPS.
+server {
+    listen 80 default_server;
+    server_name _;
+
+    location = /healthz {
+        access_log off;
+        return 200 "ok\n";
+    }
+
+    location /.well-known/acme-challenge/ {
+        root /srv/acme;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}

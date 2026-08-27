@@ -1,0 +1,38 @@
+# Chytrá Budka partition table — 8 MB flash, dual-OTA, NVS keys for encryption.
+#
+# Layout (offsets auto-computed):
+#   nvs       24 KB   — non-encrypted config (legacy / pre-keys)
+#   nvs_key    4 KB   — encrypted; holds NVS encryption keys (XTS-AES-256)
+#   otadata    8 KB   — OTA selector
+#   phy_init   4 KB   — RF calibration data
+#   coredump  64 KB   — esp_core_dump scratch, persists across resets so the
+#                       next boot can ship the panic trace via MQTT before
+#                       it's overwritten. CAPTURE_DRAM is off in
+#                       sdkconfig.defaults — re-enabling it requires growing
+#                       this partition to 256 KB first (and a destructive
+#                       reflash of every fielded board).
+#   ota_0      3.5 MB — app slot A
+#   ota_1      3.5 MB — app slot B
+#   storage   ~640 KB — SPIFFS for misc (CA bundle override, OTA scratch, etc.)
+#
+# Headroom math (8 MB flash, with bootloader + PT taking 0x10000 at the head):
+#   used  = 0x6000 + 0x1000 + 0x2000 + 0x1000 + 0x10000
+#         + 0x380000 + 0x380000 + 0xA0000   = 0x7E4000  ≈ 8.07 MB ?!
+#   actually with the 0x10000 bootloader head, flash starts data at 0x10000
+#   so used + head = 0x7F4000, leaving ~48 KB free before the chip end.
+#
+# Before adding a partition or growing one (e.g. for DRAM-capture coredump):
+#   * Drop ota_0/ota_1 to 0x340000 (3.25 MB) each — frees 512 KB total
+#   * Or shrink `storage` to 0x80000 (512 KB) — frees 128 KB
+# Either path needs a `idf.py erase-flash + flash` cycle on every device,
+# so plan it as a coordinated rollout, not a routine OTA.
+#
+# Name,    Type, SubType,   Offset,  Size,    Flags
+nvs,       data, nvs,       ,        0x6000,
+nvs_key,   data, nvs_keys,  ,        0x1000,  encrypted
+otadata,   data, ota,       ,        0x2000,
+phy_init,  data, phy,       ,        0x1000,
+coredump,  data, coredump,  ,        0x10000,
+ota_0,     app,  ota_0,     ,        0x380000,
+ota_1,     app,  ota_1,     ,        0x380000,
+storage,   data, spiffs,    ,        0xA0000,

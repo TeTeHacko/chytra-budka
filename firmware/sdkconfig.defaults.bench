@@ -1,0 +1,24 @@
+# sdkconfig.defaults.bench — the ONE debug image (USB-flash bench/dev).
+#
+# Build chain: sdkconfig.defaults;sdkconfig.defaults.esp32s3;sdkconfig.defaults.bench
+# (via tools/build.sh bench). Identical to the deployed `field` image — same
+# code, same BLE + memory diet (folded into sdkconfig.defaults.esp32s3) — EXCEPT
+# the debug HTTP endpoints below. That's the only intended bench↔field delta.
+#
+# Enables the /debug/* HTTP endpoints (intentional crash, sd wipe, wifi
+# disconnect, /debug/wifi_softap to force the SoftAP recovery portal up for RF
+# testing, …). These have NO auth and MUST be off in the field — the field
+# image leaves DEBUG_ENDPOINTS at its safe Kconfig default (n) and sets it
+# explicitly in sdkconfig.defaults.field. The bench-only raw-advert survey log
+# in ble.c is also gated on this flag, so it stays silent on the field.
+CONFIG_CHYTRA_BUDKA_DEBUG_ENDPOINTS=y
+
+# TLS against the local dev stack (self-signed cert): the bench may skip
+# server certificate verification for the mqtts:// broker and the HTTPS
+# enrollment POST. ESP_TLS_INSECURE + SKIP_SERVER_CERT_VERIFY are the esp-tls
+# plumbing that permits a no-anchor TLS session; the firmware only actually
+# skips when CHYTRA_BUDKA_TLS_INSECURE=y (never on field — field/production
+# builds verify via esp_crt_bundle).
+CONFIG_CHYTRA_BUDKA_TLS_INSECURE=y
+CONFIG_ESP_TLS_INSECURE=y
+CONFIG_ESP_TLS_SKIP_SERVER_CERT_VERIFY=y

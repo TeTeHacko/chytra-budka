@@ -1,0 +1,35 @@
+# mediamtx for the budka stack: RTSP ingest from the relay (ffmpeg push),
+# RTSP read for BirdNET-Go (published on the host via RTSP_BIND/RTSP_PORT),
+# HLS read path for the future in-UI audio player (proxied by nginx later).
+logLevel: info
+
+api: yes
+apiAddress: :9997
+
+# The API port is never published outside the docker network, so the default
+# internal user gets the extra `api` action (diagnostics from siblings).
+authInternalUsers:
+  - user: any
+    pass:
+    ips: []
+    permissions:
+      - action: publish
+      - action: read
+      - action: playback
+      - action: api
+
+rtsp: yes
+rtspAddress: :8554
+rtspTransports: [tcp]
+
+hls: yes
+hlsAddress: :8888
+hlsAlwaysRemux: no
+
+# Everything else off — audio-only deployment.
+rtmp: no
+webrtc: no
+srt: no
+
+paths:
+  all_others:

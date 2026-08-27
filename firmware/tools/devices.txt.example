@@ -1,0 +1,23 @@
+# chytra-budka USB-flash allowlist — TEMPLATE
+#
+# Copy to devices.txt and put YOUR boards' MACs in it:
+#
+#     cp firmware/tools/devices.txt.example firmware/tools/devices.txt
+#
+# devices.txt itself is gitignored: it is a list of your real hardware, it is
+# operator-local, and it should never end up in a public repo via `git add -A`.
+#
+# Format: one MAC per line, lowercase, no colons — the same 12 hex digits that
+# the /dev/esp32-<mac> udev symlink is named after (see host/README.md for the
+# udev rule). A '#' comment may follow the MAC after whitespace.
+#
+# Only MACs listed here can be flashed through tools/flash_safe.sh. Field /
+# OTA-only boards must stay OFF this list — that is the entire point of the
+# wrapper: production eFuse burns are irreversible, and a distracted
+# `idf.py -p /dev/ttyACM0 flash` against the wrong physical board can brick a
+# field unit or push an unsigned dev build onto one that must stay signed.
+#
+# The placeholder lines below are not real boards; replace them.
+
+aabbccddee01  # bench board (USB test rig, freely flashable)
+aabbccddee02  # second bench board

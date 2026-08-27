@@ -1,0 +1,101 @@
+# Mapping wiring.dot graph nodes -> Fritzing part instances.
+#
+# Each node lists:
+#   moduleIdRef : either Fritzing core moduleId, or "vendor:<file>" referencing
+#                 a .fzpz under ./parts/ (loaded as MyParts on first open).
+#   pins        : map from logical pin name (matching wiring.dot port labels
+#                 minus the `p` prefix) to the part's connector id.
+#   grid        : (col,row) for initial breadboard placement (each unit ~ 200 px).
+#   note        : optional human note shown in README.
+
+XIAO:
+  moduleIdRef: prefix8089_0e06bd81be6059fe5c685d2abdb96bf1_34
+  vendor: parts/seeed_xiao_esp32s3_sense.fzpz
+  pins:
+    p5V: connector13
+    pGND: connector12
+    p3V3: connector11
+    pD2: connector2 # GPIO3 = PIR motion in
+    pD3: connector3 # GPIO4 = IR PWM out
+    pD4: connector4 # GPIO5 = SDA
+    pD5: connector5 # GPIO6 = SCL
+  grid: [2, 2]
+
+MAX17048:
+  moduleIdRef: SparkFun-PowerIC-MAX1704X-
+  pins:
+    pVDD: connector2
+    pGND: connector3
+    pSDA: connector7
+    pSCL: connector6
+    pSNS: connector1 # CELL pin
+  grid: [4, 0]
+  note: SparkFun part labels match MAX17048 functionally (CELL=VBAT_SENSE).
+
+SHT41:
+  moduleIdRef: HMC5883L_Breakout-v11
+  pins:
+    pVDD: connector7 # VCC
+    pGND: connector6
+    pSDA: connector8
+    pSCL: connector9
+  grid: [4, 1]
+  note: |
+    Placeholder using HMC5883L breakout (same GND/VCC/SDA/SCL layout).
+    Rename the label in Fritzing GUI to "SHT41" or import the Adafruit
+    SHT4x .fzpz from https://github.com/adafruit/Fritzing-Library and
+    "Edit > Replace" the instance.
+
+PIR:
+  moduleIdRef: 4a531c3119db2e1fd301cb1292e45937_6B
+  pins:
+    pVCC: connector1 # VDD
+    pOUT: connector2 # SIG
+    pGND: connector3
+  grid: [4, 2]
+
+TP4056:
+  moduleIdRef: LiPo-USB-Charger-v21
+  pins:
+    # Core part exposes only BAT (8/9) and OUT (10/11); solar IN+/IN-
+    # are not present on this footprint. Fritzing wires for pINP/pINN
+    # are routed to BAT pins as a visual placeholder. To get a true
+    # TP4056 silkscreen, install a community part (see README).
+    pINP: connector11 # placeholder -> reuse VBAT
+    pINN: connector10 # placeholder -> reuse GND
+    pBATP: connector9 # VBAT
+    pBATN: connector8 # GND
+    pOUTP: connector11 # VBAT (same rail as BAT here)
+    pOUTN: connector10 # GND
+  grid: [2, 0]
+  note: |
+    SparkFun LiPo USB Charger used as visual stand-in. Solar input pins
+    fall back onto VBAT/GND. After opening, replace with a community
+    TP4056 part if you want IN+/IN- shown distinctly.
+
+BATT:
+  moduleIdRef: SparkFun-Electromechanical-LIPO-OUTLINE-2000
+  pins:
+    pP: connector0 # +
+    pN: connector1 # -
+  grid: [0, 0]
+
+SOLAR:
+  moduleIdRef: generic_small_6V_solar_panel_2
+  pins:
+    pP: connector0
+    pN: connector1
+  grid: [0, 1]
+
+IRDRV:
+  moduleIdRef: HIH-4030_Breakout-v10
+  pins:
+    pVIN: connector2 # VCC
+    pGATE: connector1 # OUT
+    pGND: connector0 # GND
+  grid: [4, 3]
+  note: |
+    Placeholder for the AO3400 + 220 ohm + IR LED submodule. The
+    schematic-level breakout only shows three terminals (VIN, GATE,
+    GND). Expand to MOSFET + resistor + LED in Fritzing GUI when you
+    want a faithful breadboard view.

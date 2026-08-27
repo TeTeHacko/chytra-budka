@@ -1,0 +1,26 @@
+# Espressif USB JTAG/serial debug unit — named symlinks
+# ESP32-S3, ESP32-C3, ESP32-C6, ESP32-H2 (VID 303a, PID 1001)
+#
+# Creates TWO stable symlinks per device:
+#   /dev/esp32-aabbccddee02   — by chip MAC (stable across physical ports)
+#   /dev/esp32-usb7p13        — by USB port (stable across boards)
+#
+# The MAC-based link is authoritative (ESP32 eFuse MACs are unique per chip).
+# The port-based link helps identify physical position during development.
+#
+# Helpers: /usr/local/bin/esp32-serial-name, /usr/local/bin/esp32-port-name
+
+SUBSYSTEM!="tty", GOTO="esp32_serial_end"
+
+# MAC-based symlink (primary — by chip serial/MAC)
+SUBSYSTEMS=="usb", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="1001", \
+  ENV{ID_SERIAL_SHORT}!="", \
+  PROGRAM="/usr/local/bin/esp32-serial-name %E{ID_SERIAL_SHORT}", \
+  SYMLINK+="esp32-%c", MODE="0660", GROUP="uucp"
+
+# Port-based symlink (secondary — by physical USB port)
+SUBSYSTEMS=="usb", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="1001", \
+  PROGRAM="/usr/local/bin/esp32-port-name %p", \
+  SYMLINK+="esp32-%c", MODE="0660", GROUP="uucp"
+
+LABEL="esp32_serial_end"

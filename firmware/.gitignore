@@ -1,0 +1,38 @@
+## ESP-IDF build artifacts
+build/
+build*/
+managed_components/
+sdkconfig
+sdkconfig.old
+dependencies.lock
+.cache/
+
+## Hardware CAD: track .scad source, ignore generated .stl + iteration backups
+hw/scad/*.stl
+hw/scad/prev_*/
+
+## Native test artifacts
+tests/native/build/
+
+## Legacy PlatformIO (removed in IDF migration)
+.pio/
+.pioenvs/
+.piolibdeps/
+
+## Editor / IDE
+.vscode/
+.claude/
+.opencode/
+
+## Secrets — NEVER commit
+main/secrets.h
+le_isrg_roots.pem
+tools/le_isrg_roots.pem
+keys
+build-prod/
+build-signed/
+build-sb/
+build-field/
+
+## Operator-local flash allowlist (real board MACs) — see tools/devices.txt.example
+tools/devices.txt

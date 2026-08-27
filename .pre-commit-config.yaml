@@ -1,0 +1,102 @@
+---
+# Pre-commit hooks for chytra-budka.
+#
+# Setup:  pipx install pre-commit && pre-commit install
+# Run all: pre-commit run --all-files
+# Manual (clang-format on FW): pre-commit run --hook-stage manual clang-format --all-files
+
+minimum_pre_commit_version: "3.5.0"
+
+exclude: |
+  (?x)^(
+      firmware/build/.*
+    | firmware/components/flac/flac-upstream/.*
+    | firmware/managed_components/.*
+    | firmware/hw/\.history/.*
+    | firmware/hw/__pycache__/.*
+    | relay/__pycache__/.*
+    | firmware/tools/le_isrg_roots\.pem
+    | .*\.stl
+    | .*\.png
+  )$
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        # NB: just [diff] — newer identify (pre-commit ≥4.6) dropped the
+        # 'patch' tag alias; 'diff' covers *.diff and *.patch.
+        exclude_types: [diff]
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=512"]
+      - id: check-yaml
+        args: ["--unsafe"] # allow custom tags (yamllint catches real issues)
+      - id: check-toml
+      - id: check-executables-have-shebangs
+      - id: check-shebang-scripts-are-executable
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.3
+    hooks:
+      - id: ruff-check
+        args: ["--fix"]
+      - id: ruff-format
+
+  - repo: https://github.com/scop/pre-commit-shfmt
+    rev: v3.13.1-1
+    hooks:
+      - id: shfmt
+        args: ["-i", "2", "-ci", "-bn", "-w"]
+
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
+        args: ["-x"] # follow source paths
+
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.38.0
+    hooks:
+      - id: yamllint
+        args: ["-c", ".yamllint.yml"]
+
+  # clang-format runs only on demand. Existing firmware sources predate this
+  # config; touching them in a regular commit would explode diffs. Trigger
+  # with: pre-commit run --hook-stage manual clang-format --all-files
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v19.1.7
+    hooks:
+      - id: clang-format
+        stages: [manual]
+        types_or: [c, c++]
+        exclude: |
+          (?x)^(
+              firmware/build/.*
+            | firmware/managed_components/.*
+          )$
+
+  # GlitchTip self-check: fires before `git push` to flag unresolved
+  # crash issues that the developer/agent caused during this session.
+  # Sentry-style stable-title grouping means intentional HIL crashes
+  # (test_crash_loop, manual /debug/hang) all collapse into one issue
+  # per reset_reason — they're easy to overlook. Hook exits 1 if there
+  # are unresolved issues; bypass with `git push --no-verify` if you
+  # know what you're doing, or close them via:
+  #     glitchtip-cli issues resolve --id <ID>
+  # Author-only release gate: needs the author's (unpublished) glitchtip-cli
+  # tool + credentials. Runs only on pre-push/manual stages — contributors
+  # without the tool are unaffected unless they install pre-push hooks.
+  - repo: local
+    hooks:
+      - id: glitchtip-check
+        name: GlitchTip — fail if unresolved chytra-budka issues
+        entry: glitchtip-cli issues check
+        language: system
+        stages: [pre-push, manual]
+        pass_filenames: false
+        always_run: true
